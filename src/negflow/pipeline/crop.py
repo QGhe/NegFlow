@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -167,6 +168,151 @@ def write_frame_crop_previews(
     return result
 
 
+def refine_frame_boundaries_from_source(
+    input_path: Path,
+    frame_boundaries: dict[str, Any],
+    metadata_path: Path,
+    overlay_path: Path,
+    channel_multipliers: list[float],
+    search_radius_source: int = 540,
+    sample_step: int = 12,
+    min_separator_contrast: float = 8.0,
+) -> dict[str, Any]:
+    """Refine frame-to-frame boundaries by sampling source-resolution separator bands."""
+    refined = copy.deepcopy(frame_boundaries)
+    stride = int(refined["stride"])
+    image = tifffile.memmap(input_path)
+    source_height = int(image.shape[0])
+    source_width = int(image.shape[1])
+
+    boxes = refined["boxes"]
+    adjustments = []
+    for strip_index in sorted({box["strip_index"] for box in boxes}):
+        strip_boxes = sorted(
+            (box for box in boxes if box["strip_index"] == strip_index),
+            key=lambda box: box["frame_index"],
+        )
+        for previous, current in zip(strip_boxes, strip_boxes[1:]):
+            candidate = _find_source_separator_boundary(
+                image=image,
+                previous_box=previous,
+                current_box=current,
+                source_width=source_width,
+                source_height=source_height,
+                channel_multipliers=channel_multipliers,
+                search_radius_source=search_radius_source,
+                sample_step=sample_step,
+                min_separator_contrast=min_separator_contrast,
+            )
+            if candidate["accepted"]:
+                boundary_y = int(candidate["candidate_y"])
+                previous["source_box_estimate"][3] = boundary_y
+                current["source_box_estimate"][1] = boundary_y
+                previous["preview_box"][3] = int(round(boundary_y / stride))
+                current["preview_box"][1] = int(round(boundary_y / stride))
+            adjustments.append(candidate)
+
+    for box in boxes:
+        source_x0, source_y0, source_x1, source_y1 = box["source_box_estimate"]
+        box["height"] = int(box["preview_box"][3] - box["preview_box"][1])
+        box["source_height"] = int(source_y1 - source_y0)
+        box["source_width"] = int(source_x1 - source_x0)
+        box.setdefault("flags", [])
+        if box["source_height"] <= 0 or box["source_width"] <= 0:
+            box["flags"].append("invalid_refined_source_box")
+
+    preview_image = Image.open(refined["source_preview"]).convert("RGB")
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_overlay(preview_image, boxes, overlay_path)
+
+    refined["stage"] = "frame_boundary_source_refinement"
+    refined["method"] = "preview_strip_separator_projection_with_source_separator_refinement"
+    refined["overlay"] = str(overlay_path)
+    refined["source_refinement"] = {
+        "source_tiff": str(input_path),
+        "search_radius_source": int(search_radius_source),
+        "sample_step": int(sample_step),
+        "min_separator_contrast": float(min_separator_contrast),
+        "adjustments": adjustments,
+        "accepted_adjustment_count": sum(1 for item in adjustments if item["accepted"]),
+    }
+    refined["notes"] = [
+        "Preview-space boxes refined with source-resolution separator sampling.",
+        "Frame count and strip order are constrained from the preview detector.",
+        "This remains automatic crop refinement and should still be visually reviewed.",
+    ]
+    metadata_path.write_text(json.dumps(refined, indent=2, ensure_ascii=False), encoding="utf-8")
+    return refined
+
+
+def write_crop_refinement_review(
+    preview_path: Path,
+    coarse_boundaries: dict[str, Any],
+    refined_boundaries: dict[str, Any],
+    metadata_path: Path,
+    overlay_path: Path,
+) -> dict[str, Any]:
+    """Write a visual and JSON audit comparing coarse and refined crop boxes."""
+    image = Image.open(preview_path).convert("RGB")
+    coarse_boxes = {box["id"]: box for box in coarse_boundaries["boxes"]}
+    refined_boxes = {box["id"]: box for box in refined_boundaries["boxes"]}
+    box_deltas = []
+
+    for frame_id in sorted(refined_boxes):
+        coarse = coarse_boxes.get(frame_id)
+        refined = refined_boxes[frame_id]
+        if not coarse:
+            continue
+        coarse_source = coarse["source_box_estimate"]
+        refined_source = refined["source_box_estimate"]
+        coarse_preview = coarse["preview_box"]
+        refined_preview = refined["preview_box"]
+        box_deltas.append(
+            {
+                "id": frame_id,
+                "preview_delta": [int(refined_preview[index] - coarse_preview[index]) for index in range(4)],
+                "source_delta": [int(refined_source[index] - coarse_source[index]) for index in range(4)],
+                "coarse_source_box": [int(value) for value in coarse_source],
+                "refined_source_box": [int(value) for value in refined_source],
+                "coarse_preview_box": [int(value) for value in coarse_preview],
+                "refined_preview_box": [int(value) for value in refined_preview],
+            }
+        )
+
+    adjustments = refined_boundaries.get("source_refinement", {}).get("adjustments", [])
+    accepted_adjustments = [item for item in adjustments if item["accepted"]]
+    rejected_adjustments = [item for item in adjustments if not item["accepted"]]
+    source_deltas = [abs(int(value)) for item in box_deltas for value in item["source_delta"]]
+
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_refinement_comparison_overlay(image, coarse_boundaries["boxes"], refined_boundaries["boxes"], adjustments, overlay_path)
+
+    result = {
+        "stage": "crop_refinement_review",
+        "source_preview": str(preview_path),
+        "overlay": str(overlay_path),
+        "coarse_stage": coarse_boundaries.get("stage"),
+        "refined_stage": refined_boundaries.get("stage"),
+        "frame_count": len(box_deltas),
+        "accepted_adjustment_count": len(accepted_adjustments),
+        "rejected_adjustment_count": len(rejected_adjustments),
+        "max_abs_source_delta": int(max(source_deltas)) if source_deltas else 0,
+        "box_deltas": box_deltas,
+        "adjustments": adjustments,
+        "legend": {
+            "red": "coarse preview detector box",
+            "green": "source-refined box",
+            "orange_line": "rejected separator adjustment kept at original boundary",
+        },
+        "notes": [
+            "Review artifact only; it does not change crop boxes.",
+            "Use this before deciding whether skew-aware crop cleanup is necessary.",
+        ],
+    }
+    metadata_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    return result
+
+
 def export_full_resolution_draft_frames(
     input_path: Path,
     boxes: list[dict[str, Any]],
@@ -235,6 +381,98 @@ def export_full_resolution_draft_frames(
     }
     metadata_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     return result
+
+
+def _find_source_separator_boundary(
+    image: np.ndarray,
+    previous_box: dict[str, Any],
+    current_box: dict[str, Any],
+    source_width: int,
+    source_height: int,
+    channel_multipliers: list[float],
+    search_radius_source: int,
+    sample_step: int,
+    min_separator_contrast: float,
+) -> dict[str, Any]:
+    previous_source = previous_box["source_box_estimate"]
+    current_source = current_box["source_box_estimate"]
+    current_boundary = int(round((previous_source[3] + current_source[1]) / 2))
+    previous_height = max(1, previous_source[3] - previous_source[1])
+    current_height = max(1, current_source[3] - current_source[1])
+    radius = min(search_radius_source, int(round(min(previous_height, current_height) * 0.18)))
+
+    y0 = max(0, current_boundary - radius)
+    y1 = min(source_height, current_boundary + radius)
+    x0 = max(previous_source[0], current_source[0])
+    x1 = min(previous_source[2], current_source[2], source_width)
+    width = x1 - x0
+    inset = min(max(8, width // 12), max(8, width // 4))
+    x0 = min(x1 - 1, x0 + inset)
+    x1 = max(x0 + 1, x1 - inset)
+
+    if y1 - y0 < sample_step * 3 or x1 - x0 < sample_step * 3:
+        return _separator_adjustment_result(previous_box, current_box, current_boundary, current_boundary, 0.0, False, "search_window_too_small")
+
+    patch = np.asarray(image[y0:y1:sample_step, x0:x1:sample_step])
+    luminance = _correct_inverted_luminance_profile(patch, channel_multipliers)
+    if luminance.size < 3:
+        return _separator_adjustment_result(previous_box, current_box, current_boundary, current_boundary, 0.0, False, "profile_too_short")
+
+    smoothed = _smooth_profile(luminance, radius=2)
+    candidate_index = int(np.argmin(smoothed))
+    candidate_y = int(y0 + candidate_index * sample_step)
+    contrast = float(np.median(smoothed) - smoothed[candidate_index])
+    edge_margin = max(2, int(round(len(smoothed) * 0.08)))
+    near_search_edge = candidate_index < edge_margin or candidate_index >= len(smoothed) - edge_margin
+    max_delta = int(round(min(previous_height, current_height) * 0.16))
+    delta = candidate_y - current_boundary
+    accepted = contrast >= min_separator_contrast and abs(delta) <= max_delta and not near_search_edge
+    reason = "accepted" if accepted else "low_contrast_or_unstable_candidate"
+    return _separator_adjustment_result(previous_box, current_box, current_boundary, candidate_y, contrast, accepted, reason)
+
+
+def _separator_adjustment_result(
+    previous_box: dict[str, Any],
+    current_box: dict[str, Any],
+    current_boundary: int,
+    candidate_y: int,
+    contrast: float,
+    accepted: bool,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "between": [previous_box["id"], current_box["id"]],
+        "current_boundary_y": int(current_boundary),
+        "candidate_y": int(candidate_y),
+        "delta_source_y": int(candidate_y - current_boundary),
+        "separator_contrast": float(contrast),
+        "accepted": bool(accepted),
+        "reason": reason,
+    }
+
+
+def _correct_inverted_luminance_profile(patch: np.ndarray, channel_multipliers: list[float]) -> np.ndarray:
+    inverted = _invert_by_dtype(patch)
+    preview = _to_uint8_preview(inverted)
+    if preview.ndim == 3 and preview.shape[2] >= 3 and channel_multipliers:
+        corrected = preview.astype(np.float32)
+        corrected[:, :, :3] *= np.asarray(channel_multipliers, dtype=np.float32)
+        preview = np.clip(corrected, 0, 255).astype(np.float32)
+        luminance = preview[:, :, :3].mean(axis=2)
+    elif preview.ndim == 3:
+        luminance = preview[:, :, :3].astype(np.float32).mean(axis=2)
+    else:
+        luminance = preview.astype(np.float32)
+    return luminance.mean(axis=1)
+
+
+def _smooth_profile(profile: np.ndarray, radius: int) -> np.ndarray:
+    if radius <= 0 or profile.size < radius * 2 + 1:
+        return profile.astype(np.float32)
+    kernel = np.ones(radius * 2 + 1, dtype=np.float32)
+    kernel /= kernel.sum()
+    padded = np.pad(profile.astype(np.float32), radius, mode="edge")
+    return np.convolve(padded, kernel, mode="valid")
 
 
 def _segments_from_mask(mask: np.ndarray, min_length: int) -> list[tuple[int, int]]:
@@ -390,6 +628,49 @@ def _write_overlay(image: Image.Image, boxes: list[dict[str, Any]], overlay_path
         x0, y0, x1, y1 = box["preview_box"]
         draw.rectangle((x0, y0, x1, y1), outline=(255, 64, 64), width=3)
         draw.text((x0 + 4, y0 + 4), box["id"], fill=(255, 64, 64))
+    overlay.save(overlay_path)
+
+
+def _write_refinement_comparison_overlay(
+    image: Image.Image,
+    coarse_boxes: list[dict[str, Any]],
+    refined_boxes: list[dict[str, Any]],
+    adjustments: list[dict[str, Any]],
+    overlay_path: Path,
+) -> None:
+    overlay = image.copy()
+    draw = ImageDraw.Draw(overlay)
+    for box in coarse_boxes:
+        x0, y0, x1, y1 = box["preview_box"]
+        draw.rectangle((x0, y0, x1, y1), outline=(255, 64, 64), width=2)
+    for box in refined_boxes:
+        x0, y0, x1, y1 = box["preview_box"]
+        draw.rectangle((x0, y0, x1, y1), outline=(64, 255, 96), width=2)
+        draw.text((x0 + 4, y0 + 4), box["id"], fill=(64, 255, 96))
+
+    stride = 1
+    if refined_boxes:
+        source_height = max(max(box["source_box_estimate"][3], 1) for box in refined_boxes)
+        preview_height = max(max(box["preview_box"][3], 1) for box in refined_boxes)
+        stride = max(1, int(round(source_height / preview_height)))
+
+    refined_lookup = {box["id"]: box for box in refined_boxes}
+    for adjustment in adjustments:
+        if adjustment["accepted"]:
+            continue
+        first_id, second_id = adjustment["between"]
+        first = refined_lookup.get(first_id)
+        second = refined_lookup.get(second_id)
+        if not first or not second:
+            continue
+        x0 = min(first["preview_box"][0], second["preview_box"][0])
+        x1 = max(first["preview_box"][2], second["preview_box"][2])
+        y = int(round(adjustment["current_boundary_y"] / stride))
+        draw.line((x0, y, x1, y), fill=(255, 176, 64), width=3)
+
+    draw.rectangle((6, 6, 180, 50), fill=(255, 255, 255))
+    draw.text((12, 10), "red: coarse", fill=(255, 64, 64))
+    draw.text((12, 28), "green: refined", fill=(0, 128, 48))
     overlay.save(overlay_path)
 
 

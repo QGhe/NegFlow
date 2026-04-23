@@ -1,8 +1,8 @@
 ﻿# Development Status
 
 ## Project Summary
-- Current focus: Produce traceable final PNG exports while keeping the known crop-refinement issue visible.
-- Current overall status: TIFF intake, `.fff` backend boundary, project hygiene, inversion previews, constrained frame boxes, padded previews, full-resolution draft PNGs, basic per-frame grade, and final PNG export are implemented.
+- Current focus: Make crop decisions easier to review before adding more complex geometry correction.
+- Current overall status: TIFF intake, `.fff` backend boundary, project hygiene, inversion previews, constrained frame boxes, source-resolution separator crop refinement, crop-refinement review overlays, padded previews, full-resolution draft PNGs, basic per-frame grade, and final PNG export are implemented.
 - Main goal: Create a repeatable Hasselblad X5 negative scan pipeline from TIFF / future `.fff` input to traceable PNG output.
 
 ---
@@ -857,3 +857,148 @@ python -m pip install -e . --no-deps --dry-run
 
 ### Recommended Next Step
 - Revisit the crop-refinement pass using the current final PNG manifest as the acceptance target, or connect a real `.fff` conversion backend if the converter path is available.
+
+---
+
+## Step 14 - Source separator crop refinement
+Time: 2026-04-23 11:38 Asia/Shanghai
+Status: completed
+
+### Goal
+- Improve crop boundary alignment without changing frame count or introducing overlapping crops.
+
+### Completed
+- Added source-resolution separator sampling in `src/negflow/pipeline/crop.py`.
+- Kept preview detection as the frame-count and strip-order source of truth.
+- Refined internal frame boundaries by sampling high-resolution TIFF windows around each current boundary.
+- Accepted only separator candidates with enough luminance contrast and stable position.
+- Added `05_crop/*_frame_boxes_refined.json`.
+- Added `05_crop/*_frame_boxes_refined_overlay.png`.
+- Routed frame previews, full-resolution draft frames, graded frames, and final PNG export through the refined boxes.
+- Updated the sidecar with `source_separator_crop_refinement`.
+- Updated tests to verify the refinement output exists and preserves frame count.
+- Updated `.gitignore` to exclude generated `*.egg-info/`.
+- Updated README for the refined crop output.
+
+### Files Changed
+- `.gitignore`
+- `README.md`
+- `STATUS.md`
+- `status.json`
+- `src/negflow/pipeline/crop.py`
+- `src/negflow/runner.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONPATH='src'; python -m negflow process-tiff "data\图像 002.tiff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+python -m pip install -e . --no-deps --dry-run
+```
+
+### Outputs To Inspect
+- `output/图像 002_20260423T033501Z/05_crop/图像 002_frame_boxes_refined.json`
+- `output/图像 002_20260423T033501Z/05_crop/图像 002_frame_boxes_refined_overlay.png`
+- `output/图像 002_20260423T033501Z/05_crop/图像 002_frame_contact_sheet.png`
+- `output/图像 002_20260423T033501Z/07_final/final_png/`
+- `output/图像 002_20260423T033501Z/07_final/图像 002_sidecar.json`
+
+### Problems Found
+- One candidate boundary on the sample had low separator contrast and was correctly rejected.
+- The crop is improved but still axis-aligned; it does not yet correct slight strip/frame skew.
+- Full sample processing remains around 3 minutes because it writes draft, graded, and final PNG sets.
+
+### Suspected Causes
+- Some adjacent frames have less obvious separator contrast in the positive preview.
+- The current crop model is still rectangular and axis-aligned, while scanned film/frame edges can be slightly skewed.
+- PNG writes dominate runtime.
+
+### Temporary Decisions / Workarounds
+- Keep rejected low-confidence boundary unchanged rather than risking a worse crop.
+- Keep `final_crop_refinement` pending until visual review confirms whether skew-aware crop correction is needed.
+- Continue preserving padded previews so crop errors remain easy to spot.
+
+### README Check
+- updated
+
+### Remaining Work
+- Visually review the refined outputs.
+- Decide whether to add skew-aware strip/frame rectification.
+- Connect actual `.fff` conversion backend later.
+
+### Recommended Next Step
+- Inspect the refined contact sheet and final PNGs; if crop alignment is acceptable, move next to either skew-aware crop cleanup or `.fff` backend integration.
+
+---
+
+## Step 15 - Crop refinement review overlay
+Time: 2026-04-23 13:45 Asia/Shanghai
+Status: completed
+
+### Goal
+- Add a clear review artifact for comparing coarse crop boxes against source-refined crop boxes.
+
+### Completed
+- Added `write_crop_refinement_review` in `src/negflow/pipeline/crop.py`.
+- Added `05_crop/*_crop_refinement_review.json`.
+- Added `05_crop/*_crop_refinement_review_overlay.png`.
+- The review overlay draws coarse boxes in red and refined boxes in green.
+- The review JSON records per-frame preview/source deltas, accepted adjustments, rejected adjustments, and max source-coordinate movement.
+- Integrated `crop_refinement_review` into the TIFF sidecar.
+- Updated smoke tests to verify the review JSON and overlay exist.
+- Updated README for the new crop review output.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+- `src/negflow/pipeline/crop.py`
+- `src/negflow/runner.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONPATH='src'; python -m negflow process-tiff "data\图像 002.tiff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+python -m pip install -e . --no-deps --dry-run
+```
+
+### Outputs To Inspect
+- `output/图像 002_20260423T054202Z/05_crop/图像 002_crop_refinement_review.json`
+- `output/图像 002_20260423T054202Z/05_crop/图像 002_crop_refinement_review_overlay.png`
+- `output/图像 002_20260423T054202Z/05_crop/图像 002_frame_contact_sheet.png`
+- `output/图像 002_20260423T054202Z/07_final/final_png/`
+- `output/图像 002_20260423T054202Z/07_final/图像 002_sidecar.json`
+
+### Problems Found
+- The review overlay confirms crop changes are limited to frame-to-frame boundaries; it does not address frame/strip skew.
+- The current red/green overlay is useful but still preview-resolution only.
+- Full sample processing still takes about 3 minutes because the whole pipeline rewrites image outputs.
+
+### Suspected Causes
+- The current crop model is axis-aligned and intentionally avoids geometric warping.
+- Preview overlays are fast and readable, but cannot show every full-resolution edge detail.
+- PNG export remains the runtime bottleneck.
+
+### Temporary Decisions / Workarounds
+- Use the review overlay as the decision gate before implementing skew-aware crop cleanup.
+- Keep `final_crop_refinement` pending until skew-aware cleanup is either implemented or explicitly deferred.
+
+### README Check
+- updated
+
+### Remaining Work
+- Decide whether skew-aware crop cleanup is worth implementing now.
+- Push the post-Step-14/15 changes to GitHub when requested.
+- Connect actual `.fff` conversion backend later.
+
+### Recommended Next Step
+- If the review overlay looks acceptable, either push the latest local changes to GitHub or start a small skew-aware crop investigation.

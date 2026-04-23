@@ -17,7 +17,13 @@ from .fff_backend import (
     convert_fff_to_tiff,
 )
 from .metadata import inspect_tiff_metadata
-from .pipeline.crop import detect_frame_boundaries, export_full_resolution_draft_frames, write_frame_crop_previews
+from .pipeline.crop import (
+    detect_frame_boundaries,
+    export_full_resolution_draft_frames,
+    refine_frame_boundaries_from_source,
+    write_crop_refinement_review,
+    write_frame_crop_previews,
+)
 from .pipeline.final_export import export_final_pngs
 from .pipeline.grade_basic import grade_draft_frames
 from .pipeline.invert import create_inverted_previews
@@ -149,12 +155,34 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     )
     logger.info("Frame boundary preview written: %s", frame_overlay_path)
 
+    refined_frame_boxes_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_boxes_refined.json"
+    refined_frame_overlay_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_boxes_refined_overlay.png"
+    refined_frame_boundaries = refine_frame_boundaries_from_source(
+        input_path,
+        frame_boundaries,
+        refined_frame_boxes_path,
+        refined_frame_overlay_path,
+        channel_multipliers=inverted_preview["correction"]["channel_multipliers"],
+    )
+    logger.info("Refined frame boundary preview written: %s", refined_frame_overlay_path)
+
+    crop_review_path = stage_dirs["05_crop"] / f"{input_path.stem}_crop_refinement_review.json"
+    crop_review_overlay_path = stage_dirs["05_crop"] / f"{input_path.stem}_crop_refinement_review_overlay.png"
+    crop_review = write_crop_refinement_review(
+        corrected_preview_path,
+        frame_boundaries,
+        refined_frame_boundaries,
+        crop_review_path,
+        crop_review_overlay_path,
+    )
+    logger.info("Crop refinement review written: %s", crop_review_overlay_path)
+
     frame_previews_dir = stage_dirs["05_crop"] / "frames_preview"
     frame_contact_sheet_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_contact_sheet.png"
     frame_previews_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_previews.json"
     frame_previews = write_frame_crop_previews(
         corrected_preview_path,
-        frame_boundaries["boxes"],
+        refined_frame_boundaries["boxes"],
         frame_previews_dir,
         frame_contact_sheet_path,
         frame_previews_path,
@@ -166,7 +194,7 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     draft_contact_sheet_path = stage_dirs["07_final"] / f"{input_path.stem}_draft_contact_sheet.png"
     draft_frames = export_full_resolution_draft_frames(
         input_path,
-        frame_boundaries["boxes"],
+        refined_frame_boundaries["boxes"],
         draft_frames_dir,
         draft_frames_path,
         draft_contact_sheet_path,
@@ -218,6 +246,8 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
             "inverted_preview",
             "corrected_preview",
             "frame_boundary_preview",
+            "source_separator_crop_refinement",
+            "crop_refinement_review",
             "frame_crop_previews",
             "full_resolution_draft_frames",
             "basic_per_frame_grade",
@@ -245,6 +275,20 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
                 "metadata": str(frame_boxes_path),
                 "overlay": str(frame_overlay_path),
                 "box_count": len(frame_boundaries["boxes"]),
+            },
+            "source_separator_crop_refinement": {
+                "metadata": str(refined_frame_boxes_path),
+                "overlay": str(refined_frame_overlay_path),
+                "box_count": len(refined_frame_boundaries["boxes"]),
+                "accepted_adjustment_count": refined_frame_boundaries["source_refinement"]["accepted_adjustment_count"],
+            },
+            "crop_refinement_review": {
+                "metadata": str(crop_review_path),
+                "overlay": str(crop_review_overlay_path),
+                "frame_count": crop_review["frame_count"],
+                "accepted_adjustment_count": crop_review["accepted_adjustment_count"],
+                "rejected_adjustment_count": crop_review["rejected_adjustment_count"],
+                "max_abs_source_delta": crop_review["max_abs_source_delta"],
             },
             "frame_crop_previews": {
                 "metadata": str(frame_previews_path),

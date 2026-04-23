@@ -72,6 +72,17 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             self.assertTrue(Path(frame_boundary["metadata"]).exists())
             self.assertTrue(Path(frame_boundary["overlay"]).exists())
             self.assertGreaterEqual(frame_boundary["box_count"], 1)
+            crop_refinement = sidecar["outputs"]["source_separator_crop_refinement"]
+            self.assertTrue(Path(crop_refinement["metadata"]).exists())
+            self.assertTrue(Path(crop_refinement["overlay"]).exists())
+            self.assertEqual(crop_refinement["box_count"], frame_boundary["box_count"])
+            self.assertGreaterEqual(crop_refinement["accepted_adjustment_count"], 0)
+            crop_review = sidecar["outputs"]["crop_refinement_review"]
+            self.assertTrue(Path(crop_review["metadata"]).exists())
+            self.assertTrue(Path(crop_review["overlay"]).exists())
+            self.assertEqual(crop_review["frame_count"], frame_boundary["box_count"])
+            self.assertGreaterEqual(crop_review["accepted_adjustment_count"], 0)
+            self.assertGreaterEqual(crop_review["rejected_adjustment_count"], 0)
             frame_previews = sidecar["outputs"]["frame_crop_previews"]
             self.assertTrue(Path(frame_previews["metadata"]).exists())
             self.assertTrue(Path(frame_previews["contact_sheet"]).exists())
