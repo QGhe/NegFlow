@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "negflow"
+version = "0.1.0"
+description = "Traceable CLI workflow for Hasselblad X5 negative scan processing."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.23",
+  "Pillow>=9.0",
+  "tifffile>=2023.4.12",
+]
+
+[project.scripts]
+negflow = "negflow.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

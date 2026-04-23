@@ -1,0 +1,28 @@
+﻿project_name: negflow
+
+input:
+  allow_fff: true
+  allow_tiff: true
+
+backend:
+  mode: tiff_passthrough
+  keep_intermediate_tiff: true
+
+pipeline:
+  detect_film_base: false
+  auto_invert: false
+  auto_white_balance: false
+  auto_exposure: false
+  auto_crop: false
+  cleanup_dust: false
+  cleanup_denoise: false
+  output_sharpen: false
+
+output:
+  png_bit_depth: 16
+  keep_preview_jpg: true
+  save_sidecar_json: true
+  color_profile: sRGB
+
+preset:
+  name: neutral_archive

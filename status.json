@@ -1,0 +1,28 @@
+{
+  "current_step": 13,
+  "step_name": "Final PNG export",
+  "status": "completed",
+  "last_updated": "2026-04-22T18:48:14+08:00",
+  "changed_files": [
+    "README.md",
+    "STATUS.md",
+    "status.json",
+    "src/negflow/pipeline/final_export.py",
+    "src/negflow/runner.py",
+    "tests/test_runner.py"
+  ],
+  "run_command": "$env:PYTHONPATH='src'; python -m negflow process-tiff \"data\\图像 002.tiff\" --output output --preset neutral_archive",
+  "test_command": "$env:PYTHONPATH='src'; python -m unittest discover -s tests -v; python -m pip install -e . --no-deps --dry-run",
+  "outputs_to_inspect": [
+    "output/图像 002_20260422T104400Z/07_final/final_png/",
+    "output/图像 002_20260422T104400Z/07_final/图像 002_final_png_manifest.json",
+    "output/图像 002_20260422T104400Z/07_final/图像 002_sidecar.json"
+  ],
+  "main_issues": [
+    "Final PNG export duplicates the graded frame PNGs, increasing disk usage by another full output set.",
+    "The current exported final PNGs still inherit the known crop imperfection.",
+    "Console display of Chinese paths can appear mojibake in PowerShell output, while filesystem listings still show the expected Chinese filenames."
+  ],
+  "readme_status": "updated",
+  "next_step": "Revisit the crop-refinement pass using the current final PNG manifest as the acceptance target, or connect a real .fff conversion backend if the converter path is available."
+}
