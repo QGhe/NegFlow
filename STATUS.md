@@ -1,8 +1,8 @@
 ﻿# Development Status
 
 ## Project Summary
-- Current focus: Make crop decisions easier to review before adding more complex geometry correction.
-- Current overall status: TIFF intake, `.fff` backend boundary, project hygiene, inversion previews, constrained frame boxes, source-resolution separator crop refinement, crop-refinement review overlays, padded previews, full-resolution draft PNGs, basic per-frame grade, and final PNG export are implemented.
+- Current focus: Improve negative color conversion while keeping crop/export behavior unchanged.
+- Current overall status: TIFF intake, `.fff` backend boundary, project hygiene, inversion previews, constrained frame boxes, source-resolution separator crop refinement, crop-refinement review overlays, padded previews, full-resolution draft PNGs, roll-level film-base-normalized grade, and final PNG export are implemented.
 - Main goal: Create a repeatable Hasselblad X5 negative scan pipeline from TIFF / future `.fff` input to traceable PNG output.
 
 ---
@@ -1002,3 +1002,138 @@ python -m pip install -e . --no-deps --dry-run
 
 ### Recommended Next Step
 - If the review overlay looks acceptable, either push the latest local changes to GitHub or start a small skew-aware crop investigation.
+
+---
+
+## Step 16 - Roll film-base color grade
+Time: 2026-04-23 14:38 Asia/Shanghai
+Status: completed
+
+### Goal
+- Improve color conversion only, without changing crop detection, crop coordinates, FFF handling, or final PNG naming.
+
+### Completed
+- Updated `src/negflow/pipeline/grade_basic.py`.
+- Added source-TIFF-aware grading when draft frame metadata includes `source_tiff` and crop coordinates.
+- Estimated one roll-level film base / color mask model from frame margin samples instead of estimating each frame independently.
+- Replaced the main grade path with film-base-normalized inversion followed by per-frame tone mapping.
+- Changed neutral balancing to use low-saturation midtone candidates instead of the entire image.
+- Preserved the old draft-PNG grading path as a fallback.
+- Added roll color model metadata to `04_base_grade/*_graded_frames.json`.
+- Updated tests to assert the roll color model is recorded.
+- Updated README for the new color grade behavior.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+- `src/negflow/pipeline/grade_basic.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONPATH='src'; python -m negflow process-tiff "data\图像 002.tiff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+python -m pip install -e . --no-deps --dry-run
+```
+
+### Outputs To Inspect
+- `output/图像 002_20260423T063229Z/04_base_grade/图像 002_graded_contact_sheet.png`
+- `output/图像 002_20260423T063229Z/04_base_grade/图像 002_graded_frames.json`
+- `output/图像 002_20260423T063229Z/07_final/final_png/`
+- `output/图像 002_20260423T063229Z/07_final/图像 002_sidecar.json`
+
+### Problems Found
+- The new output is more traceable and roll-consistent, but it may still look slightly cool on this overcast sample.
+- The method is still a conservative automatic grade, not a calibrated film/scanner ICC workflow.
+- The grade reads source TIFF crops again, so processing remains disk-heavy.
+
+### Suspected Causes
+- The sample appears to contain mostly overcast daylight and cool architectural scenes, making automatic neutrality ambiguous.
+- True film/scanner profiling would need known targets or scanner/film profiles, which the current sample does not provide.
+- The pipeline still writes draft, graded, and final PNGs separately.
+
+### Temporary Decisions / Workarounds
+- Prefer a shared roll-level film base estimate over per-frame color-mask guesses.
+- Keep neutral correction clipped so a single frame cannot swing color too aggressively.
+- Leave crop and export behavior unchanged for this color-only step.
+
+### README Check
+- updated
+
+### Remaining Work
+- Visually compare the new final PNGs against the previous output.
+- Tune color warmth / neutral candidate rules if the result is still too cool.
+- Push this color step to GitHub when accepted.
+
+### Recommended Next Step
+- Inspect the new graded contact sheet and final PNGs; if the direction is right, tune warmth/neutral behavior or push the color step to GitHub.
+
+---
+
+## Step 17 - Warm-neutral bias tune
+Time: 2026-04-23 14:58 Asia/Shanghai
+Status: completed
+
+### Goal
+- Slightly warm the roll-level automatic grade without changing crop/export behavior.
+
+### Completed
+- Updated `src/negflow/pipeline/grade_basic.py`.
+- Added a small warm-neutral bias after neutral balance estimation.
+- Recorded the bias in frame grade metadata as `warmth_bias`.
+- Re-ran the real sample to `output/图像 002_20260423T064857Z/`.
+- Updated tests to check that the new grade metadata records `warmth_bias`.
+- Updated README for the new warm-neutral behavior.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+- `src/negflow/pipeline/grade_basic.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONPATH='src'; python -m negflow process-tiff "data\图像 002.tiff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+python -m pip install -e . --no-deps --dry-run
+```
+
+### Outputs To Inspect
+- `output/图像 002_20260423T064857Z/04_base_grade/图像 002_graded_contact_sheet.png`
+- `output/图像 002_20260423T064857Z/04_base_grade/图像 002_graded_frames.json`
+- `output/图像 002_20260423T064857Z/07_final/final_png/`
+- `output/图像 002_20260423T064857Z/07_final/图像 002_sidecar.json`
+
+### Problems Found
+- The warm bias is intentionally mild, so improvement is subtle rather than dramatic.
+- The result is still automatic and scene-agnostic; some frames may still want manual taste adjustments.
+- Processing cost is unchanged because the source-TIFF grade path is unchanged.
+
+### Suspected Causes
+- The sample is dominated by cool overcast daylight and gray architecture, so only a modest warm shift is appropriate.
+- Stronger warming at this stage would likely push indoor highlights and neutral walls too yellow.
+
+### Temporary Decisions / Workarounds
+- Keep the warm shift explicit and recorded in metadata rather than hiding it inside film-base estimation.
+- Keep the bias small so it can be tuned again without rethinking the whole grading model.
+
+### README Check
+- updated
+
+### Remaining Work
+- Decide whether this warmth level is acceptable.
+- Push the updated color stage to GitHub.
+- Continue color tuning only if you still want a different balance.
+
+### Recommended Next Step
+- If this warmth level looks acceptable, push the latest local changes to GitHub; otherwise continue with another small color-only adjustment.

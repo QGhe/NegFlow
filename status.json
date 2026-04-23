@@ -1,30 +1,28 @@
 {
-  "current_step": 15,
-  "step_name": "Crop refinement review overlay",
+  "current_step": 17,
+  "step_name": "Warm-neutral bias tune",
   "status": "completed",
-  "last_updated": "2026-04-23T13:45:35+08:00",
+  "last_updated": "2026-04-23T14:58:01+08:00",
   "changed_files": [
     "README.md",
     "STATUS.md",
     "status.json",
-    "src/negflow/pipeline/crop.py",
-    "src/negflow/runner.py",
+    "src/negflow/pipeline/grade_basic.py",
     "tests/test_runner.py"
   ],
   "run_command": "$env:PYTHONPATH='src'; python -m negflow process-tiff \"data\\图像 002.tiff\" --output output --preset neutral_archive",
   "test_command": "$env:PYTHONPATH='src'; python -m unittest discover -s tests -v; python -m pip install -e . --no-deps --dry-run",
   "outputs_to_inspect": [
-    "output/图像 002_20260423T054202Z/05_crop/图像 002_crop_refinement_review.json",
-    "output/图像 002_20260423T054202Z/05_crop/图像 002_crop_refinement_review_overlay.png",
-    "output/图像 002_20260423T054202Z/05_crop/图像 002_frame_contact_sheet.png",
-    "output/图像 002_20260423T054202Z/07_final/final_png/",
-    "output/图像 002_20260423T054202Z/07_final/图像 002_sidecar.json"
+    "output/图像 002_20260423T064857Z/04_base_grade/图像 002_graded_contact_sheet.png",
+    "output/图像 002_20260423T064857Z/04_base_grade/图像 002_graded_frames.json",
+    "output/图像 002_20260423T064857Z/07_final/final_png/",
+    "output/图像 002_20260423T064857Z/07_final/图像 002_sidecar.json"
   ],
   "main_issues": [
-    "The review overlay confirms crop changes are limited to frame-to-frame boundaries; it does not address frame/strip skew.",
-    "The current red/green overlay is useful but still preview-resolution only.",
-    "Full sample processing still takes about 3 minutes because the whole pipeline rewrites image outputs."
+    "The warm bias is intentionally mild, so improvement is subtle rather than dramatic.",
+    "The result is still automatic and scene-agnostic; some frames may still want manual taste adjustments.",
+    "Processing cost is unchanged because the source-TIFF grade path is unchanged."
   ],
   "readme_status": "updated",
-  "next_step": "If the review overlay looks acceptable, either push the latest local changes to GitHub or start a small skew-aware crop investigation."
+  "next_step": "If this warmth level looks acceptable, push the latest local changes to GitHub; otherwise continue with another small color-only adjustment."
 }

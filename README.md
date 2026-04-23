@@ -2,7 +2,7 @@
 
 NegFlow is a command-line workflow for turning Hasselblad Flextight X5 negative scans into traceable PNG outputs.
 
-Current scope: the project has a minimal Python CLI scaffold that validates TIFF input, reads lightweight TIFF metadata, creates a standardized task directory, records a work-TIFF artifact, writes diagnostic downsampled direct and corrected inversion previews, writes a coarse frame-boundary overlay, refines frame-to-frame crop boundaries with source-resolution separator sampling, writes a crop-refinement review overlay, creates padded low-resolution per-frame crop previews, exports full-resolution draft frames, applies a basic per-frame grade, promotes those graded frames into a final PNG export folder, writes a log file, and records a sidecar JSON. It also has a `.fff` backend boundary that records a blocked task when no external converter is configured. Skew-aware crop cleanup and actual `.fff` conversion are planned next steps.
+Current scope: the project has a minimal Python CLI scaffold that validates TIFF input, reads lightweight TIFF metadata, creates a standardized task directory, records a work-TIFF artifact, writes diagnostic downsampled direct and corrected inversion previews, writes a coarse frame-boundary overlay, refines frame-to-frame crop boundaries with source-resolution separator sampling, writes a crop-refinement review overlay, creates padded low-resolution per-frame crop previews, exports full-resolution draft frames, applies roll-level film-base-normalized grading with a mild warm-neutral bias, promotes those graded frames into a final PNG export folder, writes a log file, and records a sidecar JSON. It also has a `.fff` backend boundary that records a blocked task when no external converter is configured. More color tuning and actual `.fff` conversion are planned next steps.
 
 ## How to run
 
@@ -29,7 +29,7 @@ python -m negflow process "input/example.fff" --output output --preset neutral_a
 ## Input / output overview
 
 - Input: a single `.tif` or `.tiff` file for the current development path, or a `.fff` file for backend-boundary validation.
-- Output: a task folder under `output/` with raw metadata, a work-TIFF hard link or source reference, downsampled direct/corrected inversion previews, coarse and source-refined frame-boundary overlays, a crop-refinement review overlay and JSON, padded low-resolution frame previews, full-resolution draft frames, graded frames, `07_final/final_png/` exports, a final PNG manifest, a log, and a sidecar JSON.
+- Output: a task folder under `output/` with raw metadata, a work-TIFF hard link or source reference, downsampled direct/corrected inversion previews, coarse and source-refined frame-boundary overlays, a crop-refinement review overlay and JSON, padded low-resolution frame previews, full-resolution draft frames, film-base-normalized graded frames, `07_final/final_png/` exports, a final PNG manifest, a log, and a sidecar JSON.
 
 ## Repository structure
 
@@ -44,4 +44,4 @@ data/             sample scans
 ## Notes and limitations
 
 - `.fff` conversion is intentionally not implemented yet; the current `process` command records a blocked task with a sidecar and log.
-- The current final PNGs are promoted from the basic per-frame grade. Crop boxes now include conservative source-resolution separator refinement plus a coarse-vs-refined review overlay, but skew-aware crop cleanup is still a known follow-up before considering the pipeline complete.
+- The current final PNGs are promoted from a conservative roll-level film-base-normalized grade with a small warm-neutral bias. Crop boxes include source-resolution separator refinement plus a coarse-vs-refined review overlay. Color is improved but still not a final color-managed film profile.

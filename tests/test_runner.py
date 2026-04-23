@@ -98,6 +98,9 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             self.assertTrue(Path(graded_frames["output_dir"]).is_dir())
             self.assertTrue(Path(graded_frames["contact_sheet"]).exists())
             self.assertEqual(graded_frames["frame_count"], frame_boundary["box_count"])
+            graded_metadata = json.loads(Path(graded_frames["metadata"]).read_text(encoding="utf-8"))
+            self.assertEqual(graded_metadata["roll_color_model"]["method"], "roll_margin_film_base_normalized_inversion")
+            self.assertIn("warmth_bias", graded_metadata["frames"][0]["grade"])
             final_png_export = sidecar["outputs"]["final_png_export"]
             self.assertTrue(Path(final_png_export["metadata"]).exists())
             self.assertTrue(Path(final_png_export["output_dir"]).is_dir())
