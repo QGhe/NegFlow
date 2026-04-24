@@ -1938,3 +1938,75 @@ $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest disc
 
 ### Recommended Next Step
 - Replace the default preview detector boxes with OpenCV strip-frame boxes when the OpenCV probe returns plausible results; keep the current projection detector as fallback.
+
+---
+
+## Step 29 - Promote OpenCV crop selection
+Time: 2026-04-24 17:13 Asia/Shanghai
+Status: completed
+
+### Goal
+- Use the OpenCV strip-frame detector for actual crop/refine/export when its result is plausible, while keeping the older projection detector as fallback.
+
+### Completed
+- Added an `active_frame_boundary` selection artifact that records which detector drives downstream output.
+- Wired source-resolution separator refinement, crop review, preview crops, draft frames, grading, and final PNG export to the selected active boxes.
+- Kept the old projection detector output as a separate review/fallback artifact.
+- Added plausibility checks for OpenCV boxes: non-empty frames, valid boxes, no short-frame flags, accepted strip details, and matching estimated/actual strip frame counts.
+- Added tests for choosing plausible OpenCV boxes and falling back on implausible OpenCV boxes.
+- Re-ran `图像 003.fff`; the old projection detector still reports 17 boxes, but active selection uses 12 OpenCV boxes and final PNG export now contains 12 files.
+- Re-ran `图像 002.fff`; projection, OpenCV active selection, and final PNG export all remain at 12 files.
+- Visually checked the active overlays and contact sheets for `图像 002.fff` and `图像 003.fff`; the previously bad `图像 003` second-strip frames now appear as continuous, regular frame crops.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+- `src/negflow/runner.py`
+- `src/negflow/pipeline/crop.py`
+- `src/negflow/pipeline/opencv_probe.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 003.fff" --output output --preset neutral_archive
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 002.fff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+```
+
+### Outputs To Inspect
+- `output/图像 003_20260424T090427Z/05_crop/图像 003_active_frame_boxes_overlay.png`
+- `output/图像 003_20260424T090427Z/05_crop/图像 003_frame_contact_sheet.png`
+- `output/图像 003_20260424T090427Z/07_final/final_png/`
+- `output/图像 002_20260424T090816Z/05_crop/图像 002_active_frame_boxes_overlay.png`
+- `output/图像 002_20260424T090816Z/05_crop/图像 002_frame_contact_sheet.png`
+- `output/图像 002_20260424T090816Z/07_final/final_png/`
+
+### Problems Found
+- The earlier crop error was caused by image-internal dark bands / subject edges being interpreted as separator valleys, especially in `图像 003` strip 2.
+- The new active selection greatly reduces that specific failure, but it cannot fully guarantee perfect crops for every unusual scan.
+- The current fallback rule is conservative and should be validated on `图像 001.fff` and more real rolls.
+
+### Suspected Causes
+- A global or greedy row-projection splitter cannot always distinguish a real film-frame gap from high-contrast content such as trees, cars, building edges, or dark scan bands.
+- OpenCV component ROIs plus regular separator spacing better match the physical roll layout, which is why `图像 003` now stays at 6 frames per strip.
+
+### Temporary Decisions / Workarounds
+- Prefer plausible OpenCV strip-frame boxes for downstream export.
+- Keep projection boxes as visible fallback/review artifacts instead of deleting the old detector.
+- Continue requiring visual overlay/contact-sheet review for real rolls.
+
+### README Check
+- updated
+
+### Remaining Work
+- Validate the active crop selector on `图像 001.fff` and additional complete rolls.
+- Tune fallback rules for partial rolls and highly damaged / unusually spaced scans.
+- Continue color tuning after crop behavior is stable.
+
+### Recommended Next Step
+- Run the active crop/export path on `图像 001.fff`, then decide whether to tune crop fallback rules further or move back to color improvement.

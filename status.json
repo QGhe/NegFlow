@@ -1,28 +1,33 @@
 {
-  "current_step": 28,
-  "step_name": "Regularized OpenCV separator selection",
+  "current_step": 29,
+  "step_name": "Promote OpenCV crop selection",
   "status": "completed",
-  "last_updated": "2026-04-24T16:34:00+08:00",
+  "last_updated": "2026-04-24T17:13:00+08:00",
   "changed_files": [
+    "README.md",
     "STATUS.md",
     "status.json",
+    "src/negflow/runner.py",
+    "src/negflow/pipeline/crop.py",
     "src/negflow/pipeline/opencv_probe.py",
     "tests/test_runner.py"
   ],
   "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 003.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 002.fff\" --output output --preset neutral_archive",
   "test_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v",
   "outputs_to_inspect": [
-    "output/图像 003_20260424T082621Z/05_crop/图像 003_opencv_strip_frame_probe_overlay.png",
-    "output/图像 003_20260424T082621Z/05_crop/图像 003_opencv_strip_frame_probe.json",
-    "output/图像 002_20260424T083008Z/05_crop/图像 002_opencv_strip_frame_probe_overlay.png",
-    "output/图像 002_20260424T083008Z/05_crop/图像 002_opencv_strip_frame_probe.json"
+    "output/图像 003_20260424T090427Z/05_crop/图像 003_active_frame_boxes_overlay.png",
+    "output/图像 003_20260424T090427Z/05_crop/图像 003_frame_contact_sheet.png",
+    "output/图像 003_20260424T090427Z/07_final/final_png/",
+    "output/图像 002_20260424T090816Z/05_crop/图像 002_active_frame_boxes_overlay.png",
+    "output/图像 002_20260424T090816Z/05_crop/图像 002_frame_contact_sheet.png",
+    "output/图像 002_20260424T090816Z/07_final/final_png/"
   ],
   "main_issues": [
-    "The OpenCV strip-frame probe now produces 12 candidates for 图像 003.fff instead of 13.",
-    "图像 002.fff remains stable at 12 OpenCV strip-frame candidates.",
-    "Final export still uses the old projection detector, so 图像 003.fff final PNG output remains 17 until promotion.",
-    "Git is now initialized and has a baseline commit: 94c15fb Initial NegFlow pipeline."
+    "图像 003.fff old projection detector still reports 17 boxes, but active selection now uses 12 plausible OpenCV boxes.",
+    "图像 003.fff final PNG export now contains 12 files.",
+    "图像 002.fff remains stable at 12 active boxes and 12 final PNG files.",
+    "The crop error is reduced by component ROI plus regular separator selection, but visual review is still required for unusual scans."
   ],
-  "readme_status": "no_change_needed",
-  "next_step": "Replace the default preview detector boxes with OpenCV strip-frame boxes when the OpenCV probe returns plausible results; keep the current projection detector as fallback."
+  "readme_status": "updated",
+  "next_step": "Run the active crop/export path on 图像 001.fff, then decide whether to tune crop fallback rules further or move back to color improvement."
 }

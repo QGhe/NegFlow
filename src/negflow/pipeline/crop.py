@@ -128,6 +128,13 @@ def detect_frame_boundaries(
     return result
 
 
+def write_frame_boundary_overlay(preview_path: Path, boxes: list[dict[str, Any]], overlay_path: Path) -> None:
+    """Write a plain frame-boundary overlay for already selected boxes."""
+    image = Image.open(preview_path).convert("RGB")
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_overlay(image, boxes, overlay_path)
+
+
 def _filter_near_black_boxes(
     boxes: list[dict[str, Any]],
     *,

@@ -163,7 +163,7 @@ def write_opencv_strip_frame_probe(
         "strip_details": strip_details,
         "frames": frames,
         "notes": [
-            "Diagnostic probe only; these frame candidates do not drive final crop export yet.",
+            "These frame candidates can drive final crop export when the runner's plausibility checks pass.",
             "OpenCV connected components are treated as strip ROIs, then row-luminance valleys split frames inside each accepted strip.",
             "Near-black component interiors are rejected before frame splitting.",
         ],

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from .pipeline.crop import (
     export_full_resolution_draft_frames,
     refine_frame_boundaries_from_source,
     write_crop_refinement_review,
+    write_frame_boundary_overlay,
     write_frame_crop_previews,
 )
 from .pipeline.final_export import export_final_pngs
@@ -194,7 +196,7 @@ def process_fff(input_path: Path, output_root: Path, config_path: Path, preset: 
         },
         pending_stages=["final_crop_refinement"],
         warning_overrides=[
-            "Frame crop boxes are acceptable preview estimates but not fully final; revisit crop optimization near project finish.",
+            "OpenCV-guided frame boxes are selected when plausible; the projection detector remains the fallback.",
             "Final PNGs are promoted from the basic per-frame grade; final crop refinement remains pending.",
         ],
         output_retention=output_retention,
@@ -314,11 +316,27 @@ def _run_tiff_pipeline_in_task(
     )
     logger.info("OpenCV strip frame probe written: %s", opencv_strip_frame_probe_overlay_path)
 
+    active_frame_boxes_path = stage_dirs["05_crop"] / f"{output_stem}_active_frame_boxes.json"
+    active_frame_overlay_path = stage_dirs["05_crop"] / f"{output_stem}_active_frame_boxes_overlay.png"
+    active_frame_boundaries = _select_active_frame_boundaries(
+        projection_boundaries=frame_boundaries,
+        opencv_strip_frame_probe=opencv_strip_frame_probe,
+        metadata_path=active_frame_boxes_path,
+        overlay_path=active_frame_overlay_path,
+    )
+    write_frame_boundary_overlay(corrected_preview_path, active_frame_boundaries["boxes"], active_frame_overlay_path)
+    active_frame_boxes_path.write_text(json.dumps(active_frame_boundaries, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info(
+        "Active frame boundaries written with %s detector: %s",
+        active_frame_boundaries["selection"]["active_detector"],
+        active_frame_overlay_path,
+    )
+
     refined_frame_boxes_path = stage_dirs["05_crop"] / f"{output_stem}_frame_boxes_refined.json"
     refined_frame_overlay_path = stage_dirs["05_crop"] / f"{output_stem}_frame_boxes_refined_overlay.png"
     refined_frame_boundaries = refine_frame_boundaries_from_source(
         working_tiff_path,
-        frame_boundaries,
+        active_frame_boundaries,
         refined_frame_boxes_path,
         refined_frame_overlay_path,
         channel_multipliers=inverted_preview["correction"]["channel_multipliers"],
@@ -329,7 +347,7 @@ def _run_tiff_pipeline_in_task(
     crop_review_overlay_path = stage_dirs["05_crop"] / f"{output_stem}_crop_refinement_review_overlay.png"
     crop_review = write_crop_refinement_review(
         corrected_preview_path,
-        frame_boundaries,
+        active_frame_boundaries,
         refined_frame_boundaries,
         crop_review_path,
         crop_review_overlay_path,
@@ -396,7 +414,7 @@ def _run_tiff_pipeline_in_task(
     if not warnings:
         if work_tiff_artifact["link_error"]:
             warnings.append("Work TIFF hard link failed; source reference was recorded instead.")
-        warnings.append("Frame crop boxes are acceptable preview estimates but not fully final; revisit crop optimization near project finish.")
+        warnings.append("OpenCV-guided frame boxes are selected when plausible; the projection detector remains the fallback.")
         warnings.append("Final PNGs are promoted from the basic per-frame grade; final crop refinement remains pending.")
 
     sidecar_path = stage_dirs["07_final"] / f"{output_stem}_sidecar.json"
@@ -410,6 +428,7 @@ def _run_tiff_pipeline_in_task(
         "frame_boundary_preview",
         "opencv_crop_probe",
         "opencv_strip_frame_probe",
+        "active_frame_boundary_selection",
         "source_separator_crop_refinement",
         "crop_refinement_review",
         "frame_crop_previews",
@@ -451,6 +470,14 @@ def _run_tiff_pipeline_in_task(
             "overlay": str(opencv_strip_frame_probe_overlay_path),
             "accepted_frame_count": opencv_strip_frame_probe["accepted_frame_count"],
             "rejected_component_count": opencv_strip_frame_probe["rejected_component_count"],
+        },
+        "active_frame_boundary": {
+            "metadata": str(active_frame_boxes_path),
+            "overlay": str(active_frame_overlay_path),
+            "box_count": len(active_frame_boundaries["boxes"]),
+            "active_detector": active_frame_boundaries["selection"]["active_detector"],
+            "fallback_used": active_frame_boundaries["selection"]["fallback_used"],
+            "selection_reason": active_frame_boundaries["selection"]["reason"],
         },
         "source_separator_crop_refinement": {
             "metadata": str(refined_frame_boxes_path),
@@ -520,6 +547,111 @@ def _run_tiff_pipeline_in_task(
     _close_logger(logger)
 
     return ProcessResult(task_id=task_id, task_dir=task_dir, sidecar_path=sidecar_path, log_path=log_path)
+
+
+def _select_active_frame_boundaries(
+    *,
+    projection_boundaries: dict[str, object],
+    opencv_strip_frame_probe: dict[str, object],
+    metadata_path: Path,
+    overlay_path: Path,
+) -> dict[str, object]:
+    opencv_plausible, reason = _opencv_strip_frame_probe_is_plausible(opencv_strip_frame_probe)
+    if opencv_plausible:
+        frames = copy.deepcopy(opencv_strip_frame_probe.get("frames", []))
+        for frame in frames:
+            frame.setdefault("confidence", "medium")
+        result = {
+            "stage": "active_frame_boundary_selection",
+            "method": "opencv_component_roi_row_valley_split_selected",
+            "source_preview": opencv_strip_frame_probe.get("source_preview"),
+            "source_detector_stage": opencv_strip_frame_probe.get("stage"),
+            "overlay": str(overlay_path),
+            "metadata": str(metadata_path),
+            "stride": opencv_strip_frame_probe.get("stride"),
+            "preview_size": opencv_strip_frame_probe.get("preview_size"),
+            "min_frame_height": opencv_strip_frame_probe.get("min_frame_height"),
+            "strip_details": copy.deepcopy(opencv_strip_frame_probe.get("strip_details", [])),
+            "rejected_components": int(opencv_strip_frame_probe.get("rejected_component_count", 0)),
+            "boxes": frames,
+        }
+        result["selection"] = {
+            "active_detector": "opencv_strip_frame_probe",
+            "fallback_detector": "frame_boundary_preview",
+            "fallback_used": False,
+            "reason": reason,
+            "projection_box_count": len(projection_boundaries.get("boxes", [])),
+            "opencv_box_count": len(frames),
+        }
+        result["notes"] = [
+            "OpenCV strip-frame boxes passed plausibility checks and drive downstream refinement/export.",
+            "Projection detector output is retained as a fallback artifact for review.",
+        ]
+        return result
+
+    result = copy.deepcopy(projection_boundaries)
+    result["stage"] = "active_frame_boundary_selection"
+    result["method"] = "projection_fallback_after_opencv_rejection"
+    result["overlay"] = str(overlay_path)
+    result["metadata"] = str(metadata_path)
+    result["selection"] = {
+        "active_detector": "frame_boundary_preview",
+        "fallback_detector": "frame_boundary_preview",
+        "fallback_used": True,
+        "reason": reason,
+        "projection_box_count": len(projection_boundaries.get("boxes", [])),
+        "opencv_box_count": len(opencv_strip_frame_probe.get("frames", [])),
+    }
+    result["notes"] = [
+        "OpenCV strip-frame boxes did not pass plausibility checks, so projection boxes drive downstream refinement/export.",
+        "OpenCV artifacts are still retained for review.",
+    ]
+    return result
+
+
+def _opencv_strip_frame_probe_is_plausible(opencv_strip_frame_probe: dict[str, object]) -> tuple[bool, str]:
+    frames = opencv_strip_frame_probe.get("frames", [])
+    if not isinstance(frames, list) or not frames:
+        return False, "opencv_probe_returned_no_frames"
+    if not all(isinstance(frame, dict) for frame in frames):
+        return False, "opencv_probe_has_invalid_frame_records"
+
+    if any("short_frame" in frame.get("flags", []) for frame in frames):
+        return False, "opencv_probe_has_short_frame_flags"
+
+    if not all(_has_valid_source_and_preview_box(frame) for frame in frames):
+        return False, "opencv_probe_has_invalid_boxes"
+
+    accepted_details = [
+        detail
+        for detail in opencv_strip_frame_probe.get("strip_details", [])
+        if isinstance(detail, dict) and detail.get("status") == "accepted"
+    ]
+    if not accepted_details:
+        return False, "opencv_probe_has_no_accepted_strip_details"
+
+    for detail in accepted_details:
+        frame_count = int(detail.get("frame_count", 0))
+        estimated_frame_count = int(detail.get("estimated_frame_count", 0))
+        if frame_count <= 0:
+            return False, "opencv_probe_accepted_strip_has_no_frames"
+        if estimated_frame_count > 0 and frame_count != estimated_frame_count:
+            return False, "opencv_probe_frame_count_does_not_match_estimate"
+
+    return True, "opencv_probe_passed_component_and_regular_spacing_checks"
+
+
+def _has_valid_source_and_preview_box(frame: object) -> bool:
+    if not isinstance(frame, dict):
+        return False
+    for key in ("preview_box", "source_box_estimate"):
+        box = frame.get(key)
+        if not isinstance(box, list) or len(box) != 4:
+            return False
+        x0, y0, x1, y1 = [int(value) for value in box]
+        if x1 <= x0 or y1 <= y0:
+            return False
+    return True
 
 
 def load_output_retention_config(config_path: Path) -> OutputRetentionConfig:

@@ -13,7 +13,7 @@ import tifffile
 from negflow.fff_backend import FffBackendUnavailable, load_backend_config
 from negflow.pipeline.crop import _trim_low_detail_vertical_tail, detect_frame_boundaries
 from negflow.pipeline.opencv_probe import write_opencv_crop_probe, write_opencv_strip_frame_probe
-from negflow.runner import load_output_retention_config, process_fff, process_tiff
+from negflow.runner import _select_active_frame_boundaries, load_output_retention_config, process_fff, process_tiff
 
 
 class ProcessTiffSmokeTest(unittest.TestCase):
@@ -82,41 +82,46 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             self.assertTrue(Path(opencv_strip_frame_probe["overlay"]).exists())
             self.assertGreaterEqual(opencv_strip_frame_probe["accepted_frame_count"], 1)
             self.assertGreaterEqual(opencv_strip_frame_probe["rejected_component_count"], 0)
+            active_frame_boundary = sidecar["outputs"]["active_frame_boundary"]
+            self.assertTrue(Path(active_frame_boundary["metadata"]).exists())
+            self.assertTrue(Path(active_frame_boundary["overlay"]).exists())
+            self.assertGreaterEqual(active_frame_boundary["box_count"], 1)
+            self.assertIn(active_frame_boundary["active_detector"], {"opencv_strip_frame_probe", "frame_boundary_preview"})
             crop_refinement = sidecar["outputs"]["source_separator_crop_refinement"]
             self.assertTrue(Path(crop_refinement["metadata"]).exists())
             self.assertTrue(Path(crop_refinement["overlay"]).exists())
-            self.assertEqual(crop_refinement["box_count"], frame_boundary["box_count"])
+            self.assertEqual(crop_refinement["box_count"], active_frame_boundary["box_count"])
             self.assertGreaterEqual(crop_refinement["accepted_adjustment_count"], 0)
             crop_review = sidecar["outputs"]["crop_refinement_review"]
             self.assertTrue(Path(crop_review["metadata"]).exists())
             self.assertTrue(Path(crop_review["overlay"]).exists())
-            self.assertEqual(crop_review["frame_count"], frame_boundary["box_count"])
+            self.assertEqual(crop_review["frame_count"], active_frame_boundary["box_count"])
             self.assertGreaterEqual(crop_review["accepted_adjustment_count"], 0)
             self.assertGreaterEqual(crop_review["rejected_adjustment_count"], 0)
             frame_previews = sidecar["outputs"]["frame_crop_previews"]
             self.assertTrue(Path(frame_previews["metadata"]).exists())
             self.assertTrue(Path(frame_previews["contact_sheet"]).exists())
             self.assertTrue(Path(frame_previews["output_dir"]).is_dir())
-            self.assertEqual(frame_previews["frame_count"], frame_boundary["box_count"])
+            self.assertEqual(frame_previews["frame_count"], active_frame_boundary["box_count"])
             draft_frames = sidecar["outputs"]["full_resolution_draft_frames"]
             self.assertTrue(Path(draft_frames["metadata"]).exists())
             self.assertTrue(Path(draft_frames["output_dir"]).is_dir())
             self.assertTrue(draft_frames["retained"])
             self.assertTrue(Path(draft_frames["contact_sheet"]).exists())
-            self.assertEqual(draft_frames["frame_count"], frame_boundary["box_count"])
+            self.assertEqual(draft_frames["frame_count"], active_frame_boundary["box_count"])
             graded_frames = sidecar["outputs"]["basic_per_frame_grade"]
             self.assertTrue(Path(graded_frames["metadata"]).exists())
             self.assertTrue(Path(graded_frames["output_dir"]).is_dir())
             self.assertTrue(graded_frames["retained"])
             self.assertTrue(Path(graded_frames["contact_sheet"]).exists())
-            self.assertEqual(graded_frames["frame_count"], frame_boundary["box_count"])
+            self.assertEqual(graded_frames["frame_count"], active_frame_boundary["box_count"])
             graded_metadata = json.loads(Path(graded_frames["metadata"]).read_text(encoding="utf-8"))
             self.assertEqual(graded_metadata["roll_color_model"]["method"], "roll_margin_film_base_normalized_inversion")
             self.assertIn("warmth_bias", graded_metadata["frames"][0]["grade"])
             final_png_export = sidecar["outputs"]["final_png_export"]
             self.assertTrue(Path(final_png_export["metadata"]).exists())
             self.assertTrue(Path(final_png_export["output_dir"]).is_dir())
-            self.assertEqual(final_png_export["frame_count"], frame_boundary["box_count"])
+            self.assertEqual(final_png_export["frame_count"], active_frame_boundary["box_count"])
             self.assertIn("final_png_export", sidecar["implemented_stages"])
             self.assertNotIn("final_png_export", sidecar["pending_stages"])
             self.assertIn("final_crop_refinement", sidecar["pending_stages"])
@@ -312,6 +317,122 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             )
             self.assertTrue(metadata_path.exists())
             self.assertTrue(overlay_path.exists())
+
+    def test_active_frame_boundaries_prefers_plausible_opencv_probe(self) -> None:
+        projection = {
+            "stage": "frame_boundary_preview",
+            "method": "preview_strip_separator_projection",
+            "source_preview": "preview.png",
+            "stride": 2,
+            "preview_size": [100, 200],
+            "boxes": [
+                {
+                    "id": "strip1_frame1",
+                    "strip_index": 1,
+                    "frame_index": 1,
+                    "preview_box": [10, 10, 40, 190],
+                    "source_box_estimate": [20, 20, 80, 380],
+                    "flags": ["tall_or_merged_frame"],
+                }
+            ],
+        }
+        opencv_probe = {
+            "stage": "opencv_strip_frame_probe",
+            "source_preview": "preview.png",
+            "stride": 2,
+            "preview_size": [100, 200],
+            "min_frame_height": 40,
+            "rejected_component_count": 0,
+            "strip_details": [
+                {
+                    "status": "accepted",
+                    "frame_count": 2,
+                    "estimated_frame_count": 2,
+                }
+            ],
+            "frames": [
+                {
+                    "id": "opencv_strip1_frame1",
+                    "strip_index": 1,
+                    "frame_index": 1,
+                    "preview_box": [10, 10, 40, 100],
+                    "source_box_estimate": [20, 20, 80, 200],
+                    "flags": [],
+                },
+                {
+                    "id": "opencv_strip1_frame2",
+                    "strip_index": 1,
+                    "frame_index": 2,
+                    "preview_box": [10, 100, 40, 190],
+                    "source_box_estimate": [20, 200, 80, 380],
+                    "flags": [],
+                },
+            ],
+        }
+
+        result = _select_active_frame_boundaries(
+            projection_boundaries=projection,
+            opencv_strip_frame_probe=opencv_probe,
+            metadata_path=Path("active.json"),
+            overlay_path=Path("active.png"),
+        )
+
+        self.assertEqual(result["selection"]["active_detector"], "opencv_strip_frame_probe")
+        self.assertFalse(result["selection"]["fallback_used"])
+        self.assertEqual(len(result["boxes"]), 2)
+
+    def test_active_frame_boundaries_falls_back_on_implausible_opencv_probe(self) -> None:
+        projection = {
+            "stage": "frame_boundary_preview",
+            "method": "preview_strip_separator_projection",
+            "source_preview": "preview.png",
+            "stride": 2,
+            "preview_size": [100, 200],
+            "boxes": [
+                {
+                    "id": "strip1_frame1",
+                    "strip_index": 1,
+                    "frame_index": 1,
+                    "preview_box": [10, 10, 40, 190],
+                    "source_box_estimate": [20, 20, 80, 380],
+                    "flags": [],
+                }
+            ],
+        }
+        opencv_probe = {
+            "stage": "opencv_strip_frame_probe",
+            "source_preview": "preview.png",
+            "stride": 2,
+            "preview_size": [100, 200],
+            "strip_details": [
+                {
+                    "status": "accepted",
+                    "frame_count": 2,
+                    "estimated_frame_count": 2,
+                }
+            ],
+            "frames": [
+                {
+                    "id": "opencv_strip1_frame1",
+                    "strip_index": 1,
+                    "frame_index": 1,
+                    "preview_box": [10, 10, 40, 30],
+                    "source_box_estimate": [20, 20, 80, 60],
+                    "flags": ["short_frame"],
+                }
+            ],
+        }
+
+        result = _select_active_frame_boundaries(
+            projection_boundaries=projection,
+            opencv_strip_frame_probe=opencv_probe,
+            metadata_path=Path("active.json"),
+            overlay_path=Path("active.png"),
+        )
+
+        self.assertEqual(result["selection"]["active_detector"], "frame_boundary_preview")
+        self.assertTrue(result["selection"]["fallback_used"])
+        self.assertEqual(len(result["boxes"]), 1)
 
     def test_process_tiff_can_clean_intermediate_frame_png_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
