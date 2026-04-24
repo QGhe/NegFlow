@@ -1872,3 +1872,69 @@ $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest disc
 
 ### Recommended Next Step
 - Add a conservative separator-validation rule to the OpenCV strip-frame probe, targeting the `图像 003.fff` over-split while preserving the clean 12-frame results for `图像 001.fff` and `图像 002.fff`.
+
+---
+
+## Step 28 - Regularized OpenCV separator selection
+Time: 2026-04-24 16:34 Asia/Shanghai
+Status: completed
+
+### Goal
+- Fix the `图像 003.fff` OpenCV strip-frame probe over-split where the second strip's `strip2_frame2` through `strip2_frame4` were incorrectly fragmented.
+
+### Completed
+- Reinitialized Git after the user removed the broken `.git` directory.
+- Created the baseline Git commit `94c15fb Initial NegFlow pipeline`.
+- Changed the OpenCV strip-frame probe so it estimates the expected frame count from strip geometry, then selects the most regularly spaced separator subset instead of greedily accepting every row-luminance valley.
+- Added a regression test where regular true separator bands must be preferred over irregular internal dark bands.
+- Ran the full unit test suite successfully.
+- Re-ran `图像 003.fff`; the OpenCV strip-frame probe now reports 12 accepted candidates instead of 13.
+- Confirmed `图像 003.fff` second strip now has 6 candidates: `[19-263]`, `[263-512]`, `[512-765]`, `[765-1018]`, `[1018-1273]`, `[1273-1519]` in preview space.
+- Re-ran `图像 002.fff`; the OpenCV strip-frame probe remains at 12 accepted candidates.
+- Confirmed the current final export still uses the old projection detector, so `图像 003.fff` final PNG count remains 17 until OpenCV-guided boxes are promoted in a later step.
+
+### Files Changed
+- `STATUS.md`
+- `status.json`
+- `src/negflow/pipeline/opencv_probe.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 003.fff" --output output --preset neutral_archive
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 002.fff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+```
+
+### Outputs To Inspect
+- `output/图像 003_20260424T082621Z/05_crop/图像 003_opencv_strip_frame_probe_overlay.png`
+- `output/图像 003_20260424T082621Z/05_crop/图像 003_opencv_strip_frame_probe.json`
+- `output/图像 002_20260424T083008Z/05_crop/图像 002_opencv_strip_frame_probe_overlay.png`
+- `output/图像 002_20260424T083008Z/05_crop/图像 002_opencv_strip_frame_probe.json`
+
+### Problems Found
+- The OpenCV strip-frame probe now looks correct for `图像 002.fff` and `图像 003.fff`, but final export still follows the old projection detector.
+- `图像 003.fff` final PNG output remains 17 until the OpenCV-guided detector is promoted.
+- The temporary `output/git_acl.txt` file from the earlier Git-permission investigation could not be removed due to Windows permissions, but it is under ignored `output/`.
+
+### Suspected Causes
+- The previous greedy row-valley splitter accepted internal subject shadows before later, better-spaced separator bands.
+- Selecting a regular separator subset better matches the physical spacing of frames in a strip.
+
+### Temporary Decisions / Workarounds
+- Keep the OpenCV strip-frame probe compare-only in this step.
+- Use Git commits from this point onward to anchor changes.
+
+### README Check
+- no change needed
+
+### Remaining Work
+- Promote the OpenCV strip-frame detector into the actual crop/export path, with the old projection detector kept as fallback.
+- Re-run `图像 001.fff`, `图像 002.fff`, and `图像 003.fff` after promotion to confirm final PNG counts and crop overlays.
+
+### Recommended Next Step
+- Replace the default preview detector boxes with OpenCV strip-frame boxes when the OpenCV probe returns plausible results; keep the current projection detector as fallback.

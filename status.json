@@ -1,28 +1,28 @@
 {
-  "current_step": 27,
-  "step_name": "OpenCV probe validation on 002 and 003",
+  "current_step": 28,
+  "step_name": "Regularized OpenCV separator selection",
   "status": "completed",
-  "last_updated": "2026-04-24T16:00:00+08:00",
+  "last_updated": "2026-04-24T16:34:00+08:00",
   "changed_files": [
     "STATUS.md",
-    "status.json"
+    "status.json",
+    "src/negflow/pipeline/opencv_probe.py",
+    "tests/test_runner.py"
   ],
-  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 002.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 003.fff\" --output output --preset neutral_archive",
+  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 003.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 002.fff\" --output output --preset neutral_archive",
   "test_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v",
   "outputs_to_inspect": [
-    "output/图像 002_20260424T074430Z/05_crop/图像 002_opencv_strip_frame_probe_overlay.png",
-    "output/图像 002_20260424T074430Z/05_crop/图像 002_opencv_strip_frame_probe.json",
-    "output/图像 002_20260424T074430Z/07_final/final_png/",
-    "output/图像 003_20260424T074846Z/05_crop/图像 003_opencv_strip_frame_probe_overlay.png",
-    "output/图像 003_20260424T074846Z/05_crop/图像 003_opencv_strip_frame_probe.json",
-    "output/图像 003_20260424T074846Z/07_final/final_png/"
+    "output/图像 003_20260424T082621Z/05_crop/图像 003_opencv_strip_frame_probe_overlay.png",
+    "output/图像 003_20260424T082621Z/05_crop/图像 003_opencv_strip_frame_probe.json",
+    "output/图像 002_20260424T083008Z/05_crop/图像 002_opencv_strip_frame_probe_overlay.png",
+    "output/图像 002_20260424T083008Z/05_crop/图像 002_opencv_strip_frame_probe.json"
   ],
   "main_issues": [
-    "图像 002.fff is a strong pass: OpenCV strip-frame probe produces 12 candidates and final export produces 12 PNGs.",
-    "图像 003.fff still over-splits: OpenCV strip-frame probe produces 13 candidates while the old projection detector produces 17 final PNGs.",
-    "图像 004.fff should remain a boundary case, not the primary crop validation sample.",
-    "Git initialization is blocked by a broken .git directory with stale HEAD.lock and a Windows DENY ACL."
+    "The OpenCV strip-frame probe now produces 12 candidates for 图像 003.fff instead of 13.",
+    "图像 002.fff remains stable at 12 OpenCV strip-frame candidates.",
+    "Final export still uses the old projection detector, so 图像 003.fff final PNG output remains 17 until promotion.",
+    "Git is now initialized and has a baseline commit: 94c15fb Initial NegFlow pipeline."
   ],
   "readme_status": "no_change_needed",
-  "next_step": "Add a conservative separator-validation rule to the OpenCV strip-frame probe, targeting the 图像 003.fff over-split while preserving the clean 12-frame results for 图像 001.fff and 图像 002.fff."
+  "next_step": "Replace the default preview detector boxes with OpenCV strip-frame boxes when the OpenCV probe returns plausible results; keep the current projection detector as fallback."
 }

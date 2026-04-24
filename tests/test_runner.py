@@ -241,11 +241,11 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             metadata_path = temp_path / "strip_probe.json"
             overlay_path = temp_path / "strip_overlay.png"
             preview = np.full((360, 280, 3), 235, dtype=np.uint8)
-            preview[20:110, 30:130, :] = 145
-            preview[120:210, 30:130, :] = 155
-            preview[220:320, 30:130, :] = 150
-            preview[110:120, 30:130, :] = 35
-            preview[210:220, 30:130, :] = 35
+            preview[20:110, 30:100, :] = 145
+            preview[120:210, 30:100, :] = 155
+            preview[220:320, 30:100, :] = 150
+            preview[110:120, 30:100, :] = 35
+            preview[210:220, 30:100, :] = 35
             preview[20:320, 180:250, :] = 0
             from PIL import Image
 
@@ -253,7 +253,7 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             crop_probe = {
                 "stage": "opencv_crop_probe",
                 "candidates": [
-                    {"id": "opencv_component_1", "preview_box": [30, 20, 130, 320]},
+                    {"id": "opencv_component_1", "preview_box": [30, 20, 100, 320]},
                     {"id": "opencv_component_2", "preview_box": [180, 20, 250, 320]},
                 ],
             }
@@ -270,6 +270,46 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             self.assertEqual(result["accepted_frame_count"], 3)
             self.assertEqual(result["rejected_component_count"], 1)
             self.assertEqual([frame["source_box_estimate"][0] for frame in result["frames"]], [60, 60, 60])
+            self.assertTrue(metadata_path.exists())
+            self.assertTrue(overlay_path.exists())
+
+    def test_opencv_strip_frame_probe_prefers_regular_separator_spacing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            preview_path = temp_path / "preview.png"
+            metadata_path = temp_path / "strip_probe.json"
+            overlay_path = temp_path / "strip_overlay.png"
+            preview = np.full((360, 160, 3), 235, dtype=np.uint8)
+            preview[20:320, 30:100, :] = 150
+            for y in (120, 220):
+                preview[y : y + 8, 30:100, :] = 35
+            preview[70:76, 30:100, :] = 45
+            preview[170:176, 30:100, :] = 45
+            preview[270:276, 30:100, :] = 45
+            from PIL import Image
+
+            Image.fromarray(preview, mode="RGB").save(preview_path)
+            crop_probe = {
+                "stage": "opencv_crop_probe",
+                "candidates": [
+                    {"id": "opencv_component_1", "preview_box": [30, 20, 100, 320]},
+                ],
+            }
+
+            result = write_opencv_strip_frame_probe(
+                preview_path,
+                crop_probe,
+                metadata_path,
+                overlay_path,
+                stride=2,
+                min_frame_height=60,
+            )
+
+            self.assertEqual(result["accepted_frame_count"], 3)
+            self.assertEqual(
+                [frame["preview_box"][1:4:2] for frame in result["frames"]],
+                [[20, 124], [124, 224], [224, 320]],
+            )
             self.assertTrue(metadata_path.exists())
             self.assertTrue(overlay_path.exists())
 

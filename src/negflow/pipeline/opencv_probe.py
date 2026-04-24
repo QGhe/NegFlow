@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -101,10 +102,16 @@ def write_opencv_strip_frame_probe(
             min_frame_height=effective_min_frame_height,
         )
         separator_segments = _separator_segments_from_strip_luminance(strip_luminance[content_start:content_end])
+        estimated_frame_count = _estimate_strip_frame_count(
+            content_height=content_end - content_start,
+            strip_width=strip_luminance.shape[1],
+            min_frame_height=effective_min_frame_height,
+        )
         frame_segments = _frame_segments_from_separator_segments(
             content_start,
             content_end,
             separator_segments,
+            estimated_frame_count=estimated_frame_count,
             min_frame_height=effective_min_frame_height,
         )
         detail.update(
@@ -112,6 +119,7 @@ def write_opencv_strip_frame_probe(
                 "content_y": [int(y0 + content_start), int(y0 + content_end)],
                 "tail_trim": tail_trim,
                 "separator_segments": [[int(y0 + start), int(y0 + end)] for start, end in separator_segments],
+                "estimated_frame_count": int(estimated_frame_count),
                 "frame_count": len(frame_segments),
             }
         )
@@ -305,8 +313,29 @@ def _frame_segments_from_separator_segments(
     content_end: int,
     separator_segments: list[tuple[int, int]],
     *,
+    estimated_frame_count: int,
     min_frame_height: int,
 ) -> list[tuple[int, int]]:
+    if estimated_frame_count <= 1:
+        if content_end - content_start >= min_frame_height:
+            return [(content_start, content_end)]
+        return []
+
+    selected_midpoints = _select_regular_separator_midpoints(
+        content_start,
+        content_end,
+        separator_segments,
+        estimated_frame_count=estimated_frame_count,
+        min_frame_height=min_frame_height,
+    )
+    if selected_midpoints:
+        boundaries = [content_start, *selected_midpoints, content_end]
+        return [
+            (y0, y1)
+            for y0, y1 in zip(boundaries, boundaries[1:])
+            if y1 - y0 >= min_frame_height
+        ]
+
     boundaries = [content_start]
     edge_margin = int(round(min_frame_height * 0.45))
     for y0, y1 in separator_segments:
@@ -328,6 +357,47 @@ def _frame_segments_from_separator_segments(
     if not frames and content_end - content_start >= min_frame_height:
         return [(content_start, content_end)]
     return frames
+
+
+def _estimate_strip_frame_count(content_height: int, strip_width: int, min_frame_height: int) -> int:
+    plausible_frame_height = max(float(min_frame_height), float(strip_width) * 1.35)
+    return max(1, int(round(float(content_height) / plausible_frame_height)))
+
+
+def _select_regular_separator_midpoints(
+    content_start: int,
+    content_end: int,
+    separator_segments: list[tuple[int, int]],
+    *,
+    estimated_frame_count: int,
+    min_frame_height: int,
+) -> list[int]:
+    needed = estimated_frame_count - 1
+    if needed <= 0 or len(separator_segments) < needed:
+        return []
+
+    candidate_midpoints = sorted(
+        (content_start + (y0 + y1) // 2)
+        for y0, y1 in separator_segments
+        if content_start < content_start + (y0 + y1) // 2 < content_end
+    )
+    if len(candidate_midpoints) < needed:
+        return []
+
+    ideal_height = float(content_end - content_start) / float(estimated_frame_count)
+    best_midpoints: tuple[int, ...] | None = None
+    best_score: float | None = None
+    for midpoints in combinations(candidate_midpoints, needed):
+        boundaries = (content_start, *midpoints, content_end)
+        intervals = [end - start for start, end in zip(boundaries, boundaries[1:])]
+        if min(intervals) < int(round(min_frame_height * 0.8)):
+            continue
+        score = sum(((interval - ideal_height) / ideal_height) ** 2 for interval in intervals)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_midpoints = midpoints
+
+    return list(best_midpoints or [])
 
 
 def _horizontal_inset(strip_luminance: np.ndarray) -> np.ndarray:
