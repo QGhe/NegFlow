@@ -1,0 +1,4 @@
+numpy>=1.23
+opencv-python>=4.8
+Pillow>=9.0
+tifffile>=2023.4.12

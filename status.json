@@ -1,0 +1,28 @@
+{
+  "current_step": 27,
+  "step_name": "OpenCV probe validation on 002 and 003",
+  "status": "completed",
+  "last_updated": "2026-04-24T16:00:00+08:00",
+  "changed_files": [
+    "STATUS.md",
+    "status.json"
+  ],
+  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 002.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 003.fff\" --output output --preset neutral_archive",
+  "test_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v",
+  "outputs_to_inspect": [
+    "output/图像 002_20260424T074430Z/05_crop/图像 002_opencv_strip_frame_probe_overlay.png",
+    "output/图像 002_20260424T074430Z/05_crop/图像 002_opencv_strip_frame_probe.json",
+    "output/图像 002_20260424T074430Z/07_final/final_png/",
+    "output/图像 003_20260424T074846Z/05_crop/图像 003_opencv_strip_frame_probe_overlay.png",
+    "output/图像 003_20260424T074846Z/05_crop/图像 003_opencv_strip_frame_probe.json",
+    "output/图像 003_20260424T074846Z/07_final/final_png/"
+  ],
+  "main_issues": [
+    "图像 002.fff is a strong pass: OpenCV strip-frame probe produces 12 candidates and final export produces 12 PNGs.",
+    "图像 003.fff still over-splits: OpenCV strip-frame probe produces 13 candidates while the old projection detector produces 17 final PNGs.",
+    "图像 004.fff should remain a boundary case, not the primary crop validation sample.",
+    "Git initialization is blocked by a broken .git directory with stale HEAD.lock and a Windows DENY ACL."
+  ],
+  "readme_status": "no_change_needed",
+  "next_step": "Add a conservative separator-validation rule to the OpenCV strip-frame probe, targeting the 图像 003.fff over-split while preserving the clean 12-frame results for 图像 001.fff and 图像 002.fff."
+}
