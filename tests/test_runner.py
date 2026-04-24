@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,11 +16,7 @@ from negflow.runner import process_fff, process_tiff
 
 class ProcessTiffSmokeTest(unittest.TestCase):
     def test_process_tiff_creates_task_structure(self) -> None:
-        temp_root = Path.cwd() / "output" / "_test_tmp"
-        temp_root.mkdir(parents=True, exist_ok=True)
-        self.addCleanup(lambda: shutil.rmtree(temp_root, ignore_errors=True))
-
-        with tempfile.TemporaryDirectory(dir=temp_root) as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_file = temp_path / "sample.tiff"
             sample = np.full((80, 80, 3), 5000, dtype=np.uint16)
@@ -113,11 +110,7 @@ class ProcessTiffSmokeTest(unittest.TestCase):
 
 class ProcessFffBackendTest(unittest.TestCase):
     def test_process_fff_records_blocked_sidecar_when_backend_is_missing(self) -> None:
-        temp_root = Path.cwd() / "output" / "_test_tmp"
-        temp_root.mkdir(parents=True, exist_ok=True)
-        self.addCleanup(lambda: shutil.rmtree(temp_root, ignore_errors=True))
-
-        with tempfile.TemporaryDirectory(dir=temp_root) as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_file = temp_path / "sample.fff"
             input_file.write_bytes(b"fake-fff")
@@ -139,6 +132,69 @@ class ProcessFffBackendTest(unittest.TestCase):
             self.assertIn("fff_backend_boundary", sidecar["implemented_stages"])
             self.assertIn("fff_conversion", sidecar["pending_stages"])
             self.assertTrue(sidecar["errors"])
+
+    def test_process_fff_runs_external_converter_and_completes_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_file = temp_path / "sample.fff"
+            input_file.write_bytes(b"fake-fff")
+
+            converter_script = temp_path / "mock_converter.py"
+            converter_script.write_text(
+                "\n".join(
+                    [
+                        "import sys",
+                        "from pathlib import Path",
+                        "import numpy as np",
+                        "import tifffile",
+                        "",
+                        "output_path = Path(sys.argv[2])",
+                        "output_path.parent.mkdir(parents=True, exist_ok=True)",
+                        "sample = np.full((80, 80, 3), 6000, dtype=np.uint16)",
+                        "sample[8:72, 10:35, :] = 45000",
+                        "sample[8:72, 45:70, :] = 45000",
+                        "tifffile.imwrite(output_path, sample)",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config_file = temp_path / "config.yaml"
+            config_file.write_text(
+                "\n".join(
+                    [
+                        "backend:",
+                        "  mode: external_converter",
+                        f"  external_converter_command: '\"{sys.executable}\" \"{converter_script}\" {{input_path_quoted}} {{output_tiff_path_quoted}}'",
+                        "preset:",
+                        "  name: neutral_archive",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = process_fff(
+                input_path=input_file,
+                output_root=temp_path / "output",
+                config_path=config_file,
+                preset="neutral_archive",
+            )
+
+            sidecar = json.loads(result.sidecar_path.read_text(encoding="utf-8"))
+            self.assertEqual(sidecar["status"], "completed")
+            self.assertEqual(sidecar["input_file"], str(input_file.resolve()))
+            self.assertIn("fff_conversion", sidecar["implemented_stages"])
+            self.assertNotIn("fff_backend", sidecar["pending_stages"])
+            self.assertEqual(sidecar["pending_stages"], ["final_crop_refinement"])
+            self.assertEqual(sidecar["outputs"]["work_tiff"]["method"], "converted")
+            self.assertTrue(Path(sidecar["outputs"]["work_tiff"]["path"]).exists())
+            fff_conversion = sidecar["outputs"]["fff_conversion"]
+            self.assertTrue(Path(fff_conversion["metadata"]).exists())
+            self.assertEqual(fff_conversion["backend_mode"], "external_converter")
+            self.assertTrue(Path(fff_conversion["output_tiff"]).exists())
+            self.assertTrue(Path(sidecar["outputs"]["tiff_metadata"]).exists())
+            self.assertTrue(Path(sidecar["outputs"]["final_png_export"]["metadata"]).exists())
+            self.assertTrue(Path(sidecar["outputs"]["final_png_export"]["output_dir"]).is_dir())
 
 
 if __name__ == "__main__":

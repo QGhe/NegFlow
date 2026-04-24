@@ -1,28 +1,25 @@
 {
-  "current_step": 17,
-  "step_name": "Warm-neutral bias tune",
+  "current_step": 19,
+  "step_name": "Working-document refresh",
   "status": "completed",
-  "last_updated": "2026-04-23T14:58:01+08:00",
+  "last_updated": "2026-04-24T10:20:00+08:00",
   "changed_files": [
     "README.md",
     "STATUS.md",
-    "status.json",
-    "src/negflow/pipeline/grade_basic.py",
-    "tests/test_runner.py"
+    "status.json"
   ],
-  "run_command": "$env:PYTHONPATH='src'; python -m negflow process-tiff \"data\\图像 002.tiff\" --output output --preset neutral_archive",
-  "test_command": "$env:PYTHONPATH='src'; python -m unittest discover -s tests -v; python -m pip install -e . --no-deps --dry-run",
+  "run_command": "No functional code changes in this step.",
+  "test_command": "Not rerun in this step because the update is documentation-only.",
   "outputs_to_inspect": [
-    "output/图像 002_20260423T064857Z/04_base_grade/图像 002_graded_contact_sheet.png",
-    "output/图像 002_20260423T064857Z/04_base_grade/图像 002_graded_frames.json",
-    "output/图像 002_20260423T064857Z/07_final/final_png/",
-    "output/图像 002_20260423T064857Z/07_final/图像 002_sidecar.json"
+    "README.md",
+    "STATUS.md",
+    "status.json"
   ],
   "main_issues": [
-    "The warm bias is intentionally mild, so improvement is subtle rather than dramatic.",
-    "The result is still automatic and scene-agnostic; some frames may still want manual taste adjustments.",
-    "Processing cost is unchanged because the source-TIFF grade path is unchanged."
+    "The project still needs a real Hasselblad X5 or FlexColor external converter command for live .fff validation.",
+    "Color is usable but still not final-calibration quality and may need more scanner- and scene-aware tuning.",
+    "Crop is acceptable for now, but final crop precision still deserves a wrap-up pass."
   ],
   "readme_status": "updated",
-  "next_step": "If this warmth level looks acceptable, push the latest local changes to GitHub; otherwise continue with another small color-only adjustment."
+  "next_step": "Push this documentation refresh to GitHub, then continue with either live .fff converter validation or color tuning."
 }

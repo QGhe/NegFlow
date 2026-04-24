@@ -1,9 +1,38 @@
 ﻿# Development Status
 
 ## Project Summary
-- Current focus: Improve negative color conversion while keeping crop/export behavior unchanged.
-- Current overall status: TIFF intake, `.fff` backend boundary, project hygiene, inversion previews, constrained frame boxes, source-resolution separator crop refinement, crop-refinement review overlays, padded previews, full-resolution draft PNGs, roll-level film-base-normalized grade, and final PNG export are implemented.
+- Current focus: Wire the `.fff` entry path into the existing TIFF pipeline through a configurable external converter, while keeping the current crop and color behavior stable.
+- Current overall status: TIFF intake, external `.fff` converter handoff, project hygiene, inversion previews, constrained frame boxes, source-resolution separator crop refinement, crop-refinement review overlays, padded previews, full-resolution draft PNGs, roll-level film-base-normalized grade, and final PNG export are implemented.
 - Main goal: Create a repeatable Hasselblad X5 negative scan pipeline from TIFF / future `.fff` input to traceable PNG output.
+
+## Current Methods Snapshot
+- Intake / work TIFF:
+  `tifffile` metadata inspection, hard-link-or-reference work-TIFF handling for TIFF input, and configurable external converter command handoff for `.fff`.
+- Preview image processing:
+  memory-conscious `tifffile.memmap` downsampling, direct negative inversion preview, and frame-region gray-world corrected preview.
+- Frame splitting and crop review:
+  preview-space frame detection, source-resolution separator refinement, and coarse-vs-refined crop review overlay output.
+- Per-frame export and grading:
+  padded full-resolution draft PNG export, roll-level film-base-normalized inversion, per-frame tone mapping, and mild warm-neutral bias.
+- Traceability:
+  per-stage JSON metadata, contact sheets, logs, sidecars, and final PNG manifests.
+
+## Current Completed Functionality
+- `process-tiff` end-to-end run from TIFF input to final PNG folder
+- `.fff` external converter handoff into the TIFF pipeline
+- inversion preview artifacts
+- crop refinement artifacts and review outputs
+- full-resolution draft frame export
+- automatic roll-level base grade
+- final PNG export
+- smoke tests for TIFF and mock `.fff` processing
+
+## Current Remaining Plan
+- choose and test a real Hasselblad / FlexColor `.fff` converter command on this machine
+- continue improving color accuracy while leaving crop/export behavior stable
+- revisit final crop accuracy near project wrap-up
+- consider configurable retention for draft / graded / final image sets
+- add batch processing after single-file `.fff` flow is validated
 
 ---
 
@@ -1137,3 +1166,132 @@ python -m pip install -e . --no-deps --dry-run
 
 ### Recommended Next Step
 - If this warmth level looks acceptable, push the latest local changes to GitHub; otherwise continue with another small color-only adjustment.
+
+---
+
+## Step 18 - External FFF converter handoff
+Time: 2026-04-23 16:28 Asia/Shanghai
+Status: completed
+
+### Goal
+- Turn the `.fff` backend boundary into a real external-converter handoff that can produce a work TIFF and continue through the existing TIFF pipeline.
+
+### Completed
+- Expanded `src/negflow/fff_backend.py` with backend config loading, a minimal YAML reader, and external converter command execution.
+- Added placeholder expansion for `{input_path}`, `{output_tiff_path}`, `{input_path_quoted}`, `{output_tiff_path_quoted}`, `{input_stem}`, and `{output_tiff_stem}`.
+- Added explicit conversion failure handling with captured command, return code, stdout, and stderr.
+- Refactored `src/negflow/runner.py` so `.fff` conversion can hand off directly into the same TIFF processing path used by `process-tiff`.
+- Added `02_work_tiff/*_fff_conversion.json` metadata for configured `.fff` conversions.
+- Added `backend.external_converter_command: null` to `configs/default.yaml`.
+- Added a smoke test that uses a mock external converter to create a TIFF and verifies the `.fff -> TIFF -> full pipeline` path completes.
+- Re-ran the real TIFF sample to confirm the shared pipeline refactor did not break the current working path.
+- Updated README for external converter configuration and placeholder usage.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+- `configs/default.yaml`
+- `src/negflow/fff_backend.py`
+- `src/negflow/runner.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONPATH='src'; python -m negflow process-tiff "data\图像 002.tiff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+python -m pip install -e . --no-deps --dry-run
+```
+
+### Outputs To Inspect
+- `output/图像 002_20260423T082452Z/04_base_grade/图像 002_graded_contact_sheet.png`
+- `output/图像 002_20260423T082452Z/07_final/final_png/`
+- `output/图像 002_20260423T082452Z/07_final/图像 002_sidecar.json`
+- `configs/default.yaml`
+
+### Problems Found
+- A real Hasselblad X5 / FlexColor converter command is still not configured in this environment, so live `.fff` validation has not been run yet.
+- The new YAML reader is intentionally narrow and only targets the current nested config structure used by this project.
+- The shared TIFF pipeline still writes draft, graded, and final PNG sets, so runtime remains dominated by image export.
+
+### Suspected Causes
+- The project still needs an actual external `.fff` exporter or converter that is available on this machine.
+- Adding a full YAML dependency just for backend settings was deliberately avoided in this small step.
+- PNG encoding is still the slowest part of the end-to-end path.
+
+### Temporary Decisions / Workarounds
+- Validate the `.fff` converter handoff with a mock converter test until a real converter command is chosen.
+- Keep the config reader small and local to backend settings for now.
+- Reuse the existing TIFF pipeline exactly as-is after conversion instead of branching behavior for `.fff`.
+
+### README Check
+- updated
+
+### Remaining Work
+- Choose and test a real Hasselblad / FlexColor external converter command for `.fff` input.
+- Decide later whether to replace the minimal YAML reader with a full parser.
+- Continue color tuning or output-footprint optimization as separate steps.
+
+### Recommended Next Step
+- Configure a real `.fff` converter command and run the first live `.fff` end-to-end validation, or return to color tuning while keeping this converter wiring in place.
+
+---
+
+## Step 19 - Working-document refresh
+Time: 2026-04-24 10:20 Asia/Shanghai
+Status: completed
+
+### Goal
+- Refresh the project working documents so they clearly summarize current methods, finished functionality, and remaining plans without needing to read the whole step history.
+
+### Completed
+- Updated `README.md` with dedicated sections for current methods, implemented features, and remaining plan.
+- Updated the top of `STATUS.md` with a concise snapshot of current methods, completed functionality, and remaining plan.
+- Kept the detailed step-by-step development record intact below the new summary sections.
+- Prepared the documentation state for GitHub sync.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+
+### Run Command
+```bash
+No functional code changes in this step.
+```
+
+### Test Command
+```bash
+Not rerun in this step because the update is documentation-only.
+```
+
+### Outputs To Inspect
+- `README.md`
+- `STATUS.md`
+- `status.json`
+
+### Problems Found
+- The project state was already implemented, but the highest-signal summary was spread across README text and many step entries.
+- `status.json` previously contained mojibake in some Chinese paths due to terminal/display encoding.
+
+### Suspected Causes
+- The project grew quickly through incremental steps, so the documentation remained accurate but not compact.
+- Some earlier file inspection happened through a terminal encoding path that did not preserve Chinese characters cleanly in copied output.
+
+### Temporary Decisions / Workarounds
+- Keep the detailed historical log in `STATUS.md`, but add a compact status snapshot at the top.
+- Rewrite `status.json` cleanly with current UTF-8 content.
+
+### README Check
+- updated
+
+### Remaining Work
+- Push the refreshed documentation to GitHub.
+- Continue with either live `.fff` converter validation or color tuning in the next implementation step.
+
+### Recommended Next Step
+- Push this documentation refresh to GitHub, then continue with the next functional step.

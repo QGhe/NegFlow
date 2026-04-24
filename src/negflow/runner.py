@@ -11,10 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .fff_backend import (
+    FffConversionError,
     FffBackendUnavailable,
     FffConversionRequest,
     SUPPORTED_FFF_EXTENSIONS,
     convert_fff_to_tiff,
+    load_backend_config,
 )
 from .metadata import inspect_tiff_metadata
 from .pipeline.crop import (
@@ -68,13 +70,15 @@ def process_fff(input_path: Path, output_root: Path, config_path: Path, preset: 
 
     sidecar_path = stage_dirs["07_final"] / f"{input_path.stem}_sidecar.json"
     output_tiff_path = stage_dirs["02_work_tiff"] / f"{input_path.stem}_work.tiff"
+    backend_config = load_backend_config(config_path)
 
     try:
-        convert_fff_to_tiff(
+        conversion_result = convert_fff_to_tiff(
             FffConversionRequest(
                 input_path=input_path,
                 output_tiff_path=output_tiff_path,
-                backend_mode="external_converter",
+                backend_mode=backend_config.mode,
+                converter_command=backend_config.external_converter_command,
             )
         )
     except FffBackendUnavailable as exc:
@@ -94,16 +98,95 @@ def process_fff(input_path: Path, output_root: Path, config_path: Path, preset: 
                 "sidecar": str(sidecar_path),
             },
             "errors": [str(exc)],
-            "warnings": ["No .fff converter backend is configured yet."],
+            "warnings": [f"No usable .fff converter backend is configured yet (mode={backend_config.mode!r})."],
         }
         sidecar_path.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.error("%s", exc)
         logger.info("Blocked sidecar written: %s", sidecar_path)
         _close_logger(logger)
         raise FffBackendUnavailable(str(exc), task_dir=task_dir, sidecar_path=sidecar_path, log_path=log_path) from exc
+    except FffConversionError as exc:
+        sidecar = {
+            "task_id": task_id,
+            "input_file": str(input_path),
+            "input_size_bytes": input_path.stat().st_size,
+            "created_at_utc": timestamp,
+            "preset": preset,
+            "status": "failed",
+            "implemented_stages": ["input_validation", "task_directory", "fff_backend_boundary", "logging", "sidecar"],
+            "pending_stages": ["tiff_metadata", "invert", "film_base", "base_grade", "crop", "png_export"],
+            "outputs": {
+                "task_dir": str(task_dir),
+                "intended_work_tiff": str(output_tiff_path),
+                "log": str(log_path),
+                "sidecar": str(sidecar_path),
+            },
+            "errors": [
+                {
+                    "message": str(exc),
+                    "command": exc.command,
+                    "returncode": exc.returncode,
+                    "stdout": exc.stdout,
+                    "stderr": exc.stderr,
+                }
+            ],
+            "warnings": ["The configured external converter ran but did not complete a usable TIFF conversion."],
+        }
+        sidecar_path.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.error("%s", exc)
+        if exc.command:
+            logger.error("Converter command: %s", exc.command)
+        if exc.stdout:
+            logger.info("Converter stdout:\n%s", exc.stdout)
+        if exc.stderr:
+            logger.warning("Converter stderr:\n%s", exc.stderr)
+        logger.info("Failed sidecar written: %s", sidecar_path)
+        _close_logger(logger)
+        raise FffBackendUnavailable(str(exc), task_dir=task_dir, sidecar_path=sidecar_path, log_path=log_path) from exc
 
-    _close_logger(logger)
-    return ProcessResult(task_id=task_id, task_dir=task_dir, sidecar_path=sidecar_path, log_path=log_path)
+    conversion_metadata_path = stage_dirs["02_work_tiff"] / f"{input_path.stem}_fff_conversion.json"
+    conversion_metadata = {
+        "backend_mode": conversion_result.backend_mode,
+        "command_template": conversion_result.command_template,
+        "expanded_command": conversion_result.expanded_command,
+        "output_tiff": str(conversion_result.output_tiff_path),
+        "returncode": conversion_result.returncode,
+        "stdout": conversion_result.stdout,
+        "stderr": conversion_result.stderr,
+    }
+    conversion_metadata_path.write_text(json.dumps(conversion_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info("FFF conversion metadata written: %s", conversion_metadata_path)
+
+    work_tiff_artifact = {
+        "method": "converted",
+        "path": str(conversion_result.output_tiff_path),
+        "reference": None,
+        "link_error": None,
+    }
+    return _run_tiff_pipeline_in_task(
+        source_input_path=input_path,
+        working_tiff_path=conversion_result.output_tiff_path,
+        task_id=task_id,
+        timestamp=timestamp,
+        task_dir=task_dir,
+        stage_dirs=stage_dirs,
+        log_path=log_path,
+        logger=logger,
+        preset=preset,
+        output_stem=input_path.stem,
+        work_tiff_artifact=work_tiff_artifact,
+        source_stage_name="fff_conversion",
+        source_stage_output={
+            "metadata": str(conversion_metadata_path),
+            "backend_mode": conversion_result.backend_mode,
+            "output_tiff": str(conversion_result.output_tiff_path),
+        },
+        pending_stages=["final_crop_refinement"],
+        warning_overrides=[
+            "Frame crop boxes are acceptable preview estimates but not fully final; revisit crop optimization near project finish.",
+            "Final PNGs are promoted from the basic per-frame grade; final crop refinement remains pending.",
+        ],
+    )
 
 
 def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset: str) -> ProcessResult:
@@ -121,23 +204,59 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     logger.info("Starting TIFF passthrough task")
     logger.info("Input: %s", input_path)
 
-    tiff_metadata = inspect_tiff_metadata(input_path)
-    metadata_path = stage_dirs["01_raw_meta"] / f"{input_path.stem}_tiff_metadata.json"
-    metadata_path.write_text(json.dumps(tiff_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
-    logger.info("TIFF metadata written: %s", metadata_path)
-
     config_snapshot = stage_dirs["01_raw_meta"] / "config_snapshot.yaml"
     _snapshot_config(config_path, config_snapshot, logger)
 
     work_tiff_path = stage_dirs["02_work_tiff"] / f"{input_path.stem}_work{input_path.suffix.lower()}"
     work_tiff_artifact = _materialize_work_tiff(input_path, work_tiff_path)
     logger.info("Work TIFF artifact: %s", work_tiff_artifact)
+    return _run_tiff_pipeline_in_task(
+        source_input_path=input_path,
+        working_tiff_path=input_path,
+        task_id=task_id,
+        timestamp=timestamp,
+        task_dir=task_dir,
+        stage_dirs=stage_dirs,
+        log_path=log_path,
+        logger=logger,
+        preset=preset,
+        output_stem=input_path.stem,
+        work_tiff_artifact=work_tiff_artifact,
+        source_stage_name=None,
+        source_stage_output=None,
+        pending_stages=["fff_backend", "final_crop_refinement"],
+        warning_overrides=None,
+    )
 
-    inverted_preview_path = stage_dirs["03_inverted"] / f"{input_path.stem}_inverted_preview.png"
-    corrected_preview_path = stage_dirs["03_inverted"] / f"{input_path.stem}_corrected_preview.png"
-    inverted_metadata_path = stage_dirs["03_inverted"] / f"{input_path.stem}_inverted_preview.json"
+
+def _run_tiff_pipeline_in_task(
+    *,
+    source_input_path: Path,
+    working_tiff_path: Path,
+    task_id: str,
+    timestamp: str,
+    task_dir: Path,
+    stage_dirs: dict[str, Path],
+    log_path: Path,
+    logger: logging.Logger,
+    preset: str,
+    output_stem: str,
+    work_tiff_artifact: dict[str, str | None],
+    source_stage_name: str | None,
+    source_stage_output: dict[str, object] | None,
+    pending_stages: list[str],
+    warning_overrides: list[str] | None,
+) -> ProcessResult:
+    tiff_metadata = inspect_tiff_metadata(working_tiff_path)
+    metadata_path = stage_dirs["01_raw_meta"] / f"{output_stem}_tiff_metadata.json"
+    metadata_path.write_text(json.dumps(tiff_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info("TIFF metadata written: %s", metadata_path)
+
+    inverted_preview_path = stage_dirs["03_inverted"] / f"{output_stem}_inverted_preview.png"
+    corrected_preview_path = stage_dirs["03_inverted"] / f"{output_stem}_corrected_preview.png"
+    inverted_metadata_path = stage_dirs["03_inverted"] / f"{output_stem}_inverted_preview.json"
     inverted_preview = create_inverted_previews(
-        input_path,
+        working_tiff_path,
         inverted_preview_path,
         corrected_preview_path,
         inverted_metadata_path,
@@ -145,8 +264,8 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     logger.info("Inverted preview written: %s", inverted_preview_path)
     logger.info("Corrected preview written: %s", corrected_preview_path)
 
-    frame_boxes_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_boxes.json"
-    frame_overlay_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_boxes_overlay.png"
+    frame_boxes_path = stage_dirs["05_crop"] / f"{output_stem}_frame_boxes.json"
+    frame_overlay_path = stage_dirs["05_crop"] / f"{output_stem}_frame_boxes_overlay.png"
     frame_boundaries = detect_frame_boundaries(
         corrected_preview_path,
         frame_boxes_path,
@@ -155,10 +274,10 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     )
     logger.info("Frame boundary preview written: %s", frame_overlay_path)
 
-    refined_frame_boxes_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_boxes_refined.json"
-    refined_frame_overlay_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_boxes_refined_overlay.png"
+    refined_frame_boxes_path = stage_dirs["05_crop"] / f"{output_stem}_frame_boxes_refined.json"
+    refined_frame_overlay_path = stage_dirs["05_crop"] / f"{output_stem}_frame_boxes_refined_overlay.png"
     refined_frame_boundaries = refine_frame_boundaries_from_source(
-        input_path,
+        working_tiff_path,
         frame_boundaries,
         refined_frame_boxes_path,
         refined_frame_overlay_path,
@@ -166,8 +285,8 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     )
     logger.info("Refined frame boundary preview written: %s", refined_frame_overlay_path)
 
-    crop_review_path = stage_dirs["05_crop"] / f"{input_path.stem}_crop_refinement_review.json"
-    crop_review_overlay_path = stage_dirs["05_crop"] / f"{input_path.stem}_crop_refinement_review_overlay.png"
+    crop_review_path = stage_dirs["05_crop"] / f"{output_stem}_crop_refinement_review.json"
+    crop_review_overlay_path = stage_dirs["05_crop"] / f"{output_stem}_crop_refinement_review_overlay.png"
     crop_review = write_crop_refinement_review(
         corrected_preview_path,
         frame_boundaries,
@@ -178,8 +297,8 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     logger.info("Crop refinement review written: %s", crop_review_overlay_path)
 
     frame_previews_dir = stage_dirs["05_crop"] / "frames_preview"
-    frame_contact_sheet_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_contact_sheet.png"
-    frame_previews_path = stage_dirs["05_crop"] / f"{input_path.stem}_frame_previews.json"
+    frame_contact_sheet_path = stage_dirs["05_crop"] / f"{output_stem}_frame_contact_sheet.png"
+    frame_previews_path = stage_dirs["05_crop"] / f"{output_stem}_frame_previews.json"
     frame_previews = write_frame_crop_previews(
         corrected_preview_path,
         refined_frame_boundaries["boxes"],
@@ -190,10 +309,10 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     logger.info("Frame crop contact sheet written: %s", frame_contact_sheet_path)
 
     draft_frames_dir = stage_dirs["07_final"] / "draft_frames"
-    draft_frames_path = stage_dirs["07_final"] / f"{input_path.stem}_draft_frames.json"
-    draft_contact_sheet_path = stage_dirs["07_final"] / f"{input_path.stem}_draft_contact_sheet.png"
+    draft_frames_path = stage_dirs["07_final"] / f"{output_stem}_draft_frames.json"
+    draft_contact_sheet_path = stage_dirs["07_final"] / f"{output_stem}_draft_contact_sheet.png"
     draft_frames = export_full_resolution_draft_frames(
-        input_path,
+        working_tiff_path,
         refined_frame_boundaries["boxes"],
         draft_frames_dir,
         draft_frames_path,
@@ -203,8 +322,8 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     logger.info("Draft full-resolution frames written: %s", draft_frames_dir)
 
     graded_frames_dir = stage_dirs["04_base_grade"] / "graded_frames"
-    graded_frames_path = stage_dirs["04_base_grade"] / f"{input_path.stem}_graded_frames.json"
-    graded_contact_sheet_path = stage_dirs["04_base_grade"] / f"{input_path.stem}_graded_contact_sheet.png"
+    graded_frames_path = stage_dirs["04_base_grade"] / f"{output_stem}_graded_frames.json"
+    graded_contact_sheet_path = stage_dirs["04_base_grade"] / f"{output_stem}_graded_contact_sheet.png"
     graded_frames = grade_draft_frames(
         draft_frames,
         graded_frames_dir,
@@ -214,110 +333,117 @@ def process_tiff(input_path: Path, output_root: Path, config_path: Path, preset:
     logger.info("Graded draft frames written: %s", graded_frames_dir)
 
     final_png_dir = stage_dirs["07_final"] / "final_png"
-    final_png_manifest_path = stage_dirs["07_final"] / f"{input_path.stem}_final_png_manifest.json"
+    final_png_manifest_path = stage_dirs["07_final"] / f"{output_stem}_final_png_manifest.json"
     final_png_export = export_final_pngs(
         graded_frames,
         final_png_dir,
         final_png_manifest_path,
-        input_path.stem,
+        output_stem,
     )
     logger.info("Final PNG export written: %s", final_png_dir)
 
-    warnings = []
-    if work_tiff_artifact["link_error"]:
-        warnings.append("Work TIFF hard link failed; source reference was recorded instead.")
-    warnings.append("Frame crop boxes are acceptable preview estimates but not fully final; revisit crop optimization near project finish.")
-    warnings.append("Final PNGs are promoted from the basic per-frame grade; final crop refinement remains pending.")
+    warnings = list(warning_overrides or [])
+    if not warnings:
+        if work_tiff_artifact["link_error"]:
+            warnings.append("Work TIFF hard link failed; source reference was recorded instead.")
+        warnings.append("Frame crop boxes are acceptable preview estimates but not fully final; revisit crop optimization near project finish.")
+        warnings.append("Final PNGs are promoted from the basic per-frame grade; final crop refinement remains pending.")
 
-    sidecar_path = stage_dirs["07_final"] / f"{input_path.stem}_sidecar.json"
+    sidecar_path = stage_dirs["07_final"] / f"{output_stem}_sidecar.json"
+    implemented_stages = [
+        "input_validation",
+        "task_directory",
+        "tiff_metadata",
+        "work_tiff",
+        "inverted_preview",
+        "corrected_preview",
+        "frame_boundary_preview",
+        "source_separator_crop_refinement",
+        "crop_refinement_review",
+        "frame_crop_previews",
+        "full_resolution_draft_frames",
+        "basic_per_frame_grade",
+        "final_png_export",
+        "logging",
+        "sidecar",
+    ]
+    outputs = {
+        "task_dir": str(task_dir),
+        "tiff_metadata": str(metadata_path),
+        "work_tiff": work_tiff_artifact,
+        "inverted_preview": {
+            "preview": str(inverted_preview_path),
+            "metadata": str(inverted_metadata_path),
+            "stride": inverted_preview["stride"],
+            "preview_shape": inverted_preview["preview_shape"],
+        },
+        "corrected_preview": {
+            "preview": str(corrected_preview_path),
+            "metadata": str(inverted_metadata_path),
+            "correction": inverted_preview["correction"],
+        },
+        "frame_boundary_preview": {
+            "metadata": str(frame_boxes_path),
+            "overlay": str(frame_overlay_path),
+            "box_count": len(frame_boundaries["boxes"]),
+        },
+        "source_separator_crop_refinement": {
+            "metadata": str(refined_frame_boxes_path),
+            "overlay": str(refined_frame_overlay_path),
+            "box_count": len(refined_frame_boundaries["boxes"]),
+            "accepted_adjustment_count": refined_frame_boundaries["source_refinement"]["accepted_adjustment_count"],
+        },
+        "crop_refinement_review": {
+            "metadata": str(crop_review_path),
+            "overlay": str(crop_review_overlay_path),
+            "frame_count": crop_review["frame_count"],
+            "accepted_adjustment_count": crop_review["accepted_adjustment_count"],
+            "rejected_adjustment_count": crop_review["rejected_adjustment_count"],
+            "max_abs_source_delta": crop_review["max_abs_source_delta"],
+        },
+        "frame_crop_previews": {
+            "metadata": str(frame_previews_path),
+            "contact_sheet": str(frame_contact_sheet_path),
+            "output_dir": str(frame_previews_dir),
+            "frame_count": frame_previews["frame_count"],
+            "padding_ratio": frame_previews["padding_ratio"],
+        },
+        "full_resolution_draft_frames": {
+            "metadata": str(draft_frames_path),
+            "output_dir": str(draft_frames_dir),
+            "contact_sheet": str(draft_contact_sheet_path),
+            "frame_count": draft_frames["frame_count"],
+            "padding_ratio": draft_frames["padding_ratio"],
+        },
+        "basic_per_frame_grade": {
+            "metadata": str(graded_frames_path),
+            "output_dir": str(graded_frames_dir),
+            "contact_sheet": str(graded_contact_sheet_path),
+            "frame_count": graded_frames["frame_count"],
+        },
+        "final_png_export": {
+            "metadata": str(final_png_manifest_path),
+            "output_dir": str(final_png_dir),
+            "frame_count": final_png_export["frame_count"],
+        },
+        "log": str(log_path),
+        "sidecar": str(sidecar_path),
+    }
+    if source_stage_name and source_stage_output:
+        implemented_stages.insert(2, source_stage_name)
+        outputs[source_stage_name] = source_stage_output
+
     sidecar = {
         "task_id": task_id,
-        "input_file": str(input_path),
-        "input_size_bytes": input_path.stat().st_size,
+        "input_file": str(source_input_path),
+        "input_size_bytes": source_input_path.stat().st_size,
         "tiff_metadata": tiff_metadata,
         "created_at_utc": timestamp,
         "preset": preset,
         "status": "completed",
-        "implemented_stages": [
-            "input_validation",
-            "task_directory",
-            "tiff_metadata",
-            "work_tiff",
-            "inverted_preview",
-            "corrected_preview",
-            "frame_boundary_preview",
-            "source_separator_crop_refinement",
-            "crop_refinement_review",
-            "frame_crop_previews",
-            "full_resolution_draft_frames",
-            "basic_per_frame_grade",
-            "final_png_export",
-            "logging",
-            "sidecar",
-        ],
-        "pending_stages": ["fff_backend", "final_crop_refinement"],
-        "outputs": {
-            "task_dir": str(task_dir),
-            "tiff_metadata": str(metadata_path),
-            "work_tiff": work_tiff_artifact,
-            "inverted_preview": {
-                "preview": str(inverted_preview_path),
-                "metadata": str(inverted_metadata_path),
-                "stride": inverted_preview["stride"],
-                "preview_shape": inverted_preview["preview_shape"],
-            },
-            "corrected_preview": {
-                "preview": str(corrected_preview_path),
-                "metadata": str(inverted_metadata_path),
-                "correction": inverted_preview["correction"],
-            },
-            "frame_boundary_preview": {
-                "metadata": str(frame_boxes_path),
-                "overlay": str(frame_overlay_path),
-                "box_count": len(frame_boundaries["boxes"]),
-            },
-            "source_separator_crop_refinement": {
-                "metadata": str(refined_frame_boxes_path),
-                "overlay": str(refined_frame_overlay_path),
-                "box_count": len(refined_frame_boundaries["boxes"]),
-                "accepted_adjustment_count": refined_frame_boundaries["source_refinement"]["accepted_adjustment_count"],
-            },
-            "crop_refinement_review": {
-                "metadata": str(crop_review_path),
-                "overlay": str(crop_review_overlay_path),
-                "frame_count": crop_review["frame_count"],
-                "accepted_adjustment_count": crop_review["accepted_adjustment_count"],
-                "rejected_adjustment_count": crop_review["rejected_adjustment_count"],
-                "max_abs_source_delta": crop_review["max_abs_source_delta"],
-            },
-            "frame_crop_previews": {
-                "metadata": str(frame_previews_path),
-                "contact_sheet": str(frame_contact_sheet_path),
-                "output_dir": str(frame_previews_dir),
-                "frame_count": frame_previews["frame_count"],
-                "padding_ratio": frame_previews["padding_ratio"],
-            },
-            "full_resolution_draft_frames": {
-                "metadata": str(draft_frames_path),
-                "output_dir": str(draft_frames_dir),
-                "contact_sheet": str(draft_contact_sheet_path),
-                "frame_count": draft_frames["frame_count"],
-                "padding_ratio": draft_frames["padding_ratio"],
-            },
-            "basic_per_frame_grade": {
-                "metadata": str(graded_frames_path),
-                "output_dir": str(graded_frames_dir),
-                "contact_sheet": str(graded_contact_sheet_path),
-                "frame_count": graded_frames["frame_count"],
-            },
-            "final_png_export": {
-                "metadata": str(final_png_manifest_path),
-                "output_dir": str(final_png_dir),
-                "frame_count": final_png_export["frame_count"],
-            },
-            "log": str(log_path),
-            "sidecar": str(sidecar_path),
-        },
+        "implemented_stages": implemented_stages,
+        "pending_stages": pending_stages,
+        "outputs": outputs,
         "warnings": warnings,
     }
     sidecar_path.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8")
