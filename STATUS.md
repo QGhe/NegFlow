@@ -2010,3 +2010,60 @@ $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest disc
 
 ### Recommended Next Step
 - Run the active crop/export path on `图像 001.fff`, then decide whether to tune crop fallback rules further or move back to color improvement.
+
+---
+
+## Step 30 - Validate active crop on image 001
+Time: 2026-04-24 18:14 Asia/Shanghai
+Status: completed
+
+### Goal
+- Run the promoted OpenCV active crop/export path on `图像 001.fff` as a third complete-roll regression sample.
+
+### Completed
+- Re-ran `图像 001.fff` through the full `.fff -> active crop -> final PNG` pipeline.
+- Confirmed active selection used `opencv_strip_frame_probe`.
+- Confirmed the projection detector, OpenCV active selection, and final PNG export all report 12 frames.
+- Visually reviewed the active frame overlay and crop contact sheet; no obvious internal-texture over-split like the earlier `图像 003` failure was visible.
+- Re-ran the full unit test suite successfully.
+
+### Files Changed
+- `STATUS.md`
+- `status.json`
+
+### Run Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 001.fff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+```
+
+### Outputs To Inspect
+- `output/图像 001_20260424T100940Z/05_crop/图像 001_active_frame_boxes_overlay.png`
+- `output/图像 001_20260424T100940Z/05_crop/图像 001_frame_contact_sheet.png`
+- `output/图像 001_20260424T100940Z/07_final/final_png/`
+- `output/图像 001_20260424T100940Z/07_final/图像 001_sidecar.json`
+
+### Problems Found
+- No new crop-selection failure was found on `图像 001.fff`.
+- Terminal display still shows mojibake for some Chinese paths in command output, but generated filesystem paths and artifacts are usable.
+
+### Suspected Causes
+- `图像 001.fff` has clear strip geometry and the OpenCV ROI plus regular separator selection matches the expected 6 frames per strip.
+
+### Temporary Decisions / Workarounds
+- Treat `图像 001.fff`, `图像 002.fff`, and `图像 003.fff` as passing the current active crop detector.
+- Keep `图像 004.fff` out of the primary complete-roll validation set because it has only one frame.
+
+### README Check
+- no change needed
+
+### Remaining Work
+- Tune crop fallback only if a new real roll exposes a failure.
+- Move back to color improvement now that the active crop path is stable on the three complete sample rolls.
+
+### Recommended Next Step
+- Start a small color-quality step: compare the latest final PNG contact sheets for `图像 001.fff`, `图像 002.fff`, and `图像 003.fff`, then tune only one color parameter or grading rule if a consistent cast/problem is visible.

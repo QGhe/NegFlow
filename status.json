@@ -1,33 +1,26 @@
 {
-  "current_step": 29,
-  "step_name": "Promote OpenCV crop selection",
+  "current_step": 30,
+  "step_name": "Validate active crop on image 001",
   "status": "completed",
-  "last_updated": "2026-04-24T17:13:00+08:00",
+  "last_updated": "2026-04-24T18:14:00+08:00",
   "changed_files": [
-    "README.md",
     "STATUS.md",
-    "status.json",
-    "src/negflow/runner.py",
-    "src/negflow/pipeline/crop.py",
-    "src/negflow/pipeline/opencv_probe.py",
-    "tests/test_runner.py"
+    "status.json"
   ],
-  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 003.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 002.fff\" --output output --preset neutral_archive",
+  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 001.fff\" --output output --preset neutral_archive",
   "test_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v",
   "outputs_to_inspect": [
-    "output/图像 003_20260424T090427Z/05_crop/图像 003_active_frame_boxes_overlay.png",
-    "output/图像 003_20260424T090427Z/05_crop/图像 003_frame_contact_sheet.png",
-    "output/图像 003_20260424T090427Z/07_final/final_png/",
-    "output/图像 002_20260424T090816Z/05_crop/图像 002_active_frame_boxes_overlay.png",
-    "output/图像 002_20260424T090816Z/05_crop/图像 002_frame_contact_sheet.png",
-    "output/图像 002_20260424T090816Z/07_final/final_png/"
+    "output/图像 001_20260424T100940Z/05_crop/图像 001_active_frame_boxes_overlay.png",
+    "output/图像 001_20260424T100940Z/05_crop/图像 001_frame_contact_sheet.png",
+    "output/图像 001_20260424T100940Z/07_final/final_png/",
+    "output/图像 001_20260424T100940Z/07_final/图像 001_sidecar.json"
   ],
   "main_issues": [
-    "图像 003.fff old projection detector still reports 17 boxes, but active selection now uses 12 plausible OpenCV boxes.",
-    "图像 003.fff final PNG export now contains 12 files.",
-    "图像 002.fff remains stable at 12 active boxes and 12 final PNG files.",
-    "The crop error is reduced by component ROI plus regular separator selection, but visual review is still required for unusual scans."
+    "图像 001.fff active selection used opencv_strip_frame_probe.",
+    "图像 001.fff projection detector, OpenCV active selection, and final PNG export all report 12 frames.",
+    "No obvious crop-selection failure was visible in the active overlay or contact sheet.",
+    "The active crop detector now passes the three complete sample rolls: 图像 001.fff, 图像 002.fff, and 图像 003.fff."
   ],
-  "readme_status": "updated",
-  "next_step": "Run the active crop/export path on 图像 001.fff, then decide whether to tune crop fallback rules further or move back to color improvement."
+  "readme_status": "no_change_needed",
+  "next_step": "Start a small color-quality step: compare the latest final PNG contact sheets for 图像 001.fff, 图像 002.fff, and 图像 003.fff, then tune only one color parameter or grading rule if a consistent cast/problem is visible."
 }
