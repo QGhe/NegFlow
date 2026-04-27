@@ -2128,3 +2128,71 @@ python -m json.tool output\color_review_20260427T000000Z\color_quality_review.js
 
 ### Recommended Next Step
 - Add a conservative post-balance saturation/chroma boost in the source TIFF grading path, then rerun `图像 001.fff`, `图像 002.fff`, and `图像 003.fff` to compare contact sheets and stats.
+
+---
+
+## Step 32 - Color calibration logic review
+Time: 2026-04-27 11:05 Asia/Shanghai
+Status: completed
+
+### Goal
+- Evaluate whether film-edge black/white reference areas should drive color calibration, and define the next color-calibration logic before changing grading code.
+
+### Completed
+- Re-read the current grading implementation.
+- Confirmed the current pipeline already uses crop padding / margin pixels, but only as mixed percentile samples: 94th percentile for film base and 2nd percentile for black reference.
+- Generated a dedicated calibration diagnostic from `图像 001.fff`, `图像 002.fff`, and `图像 003.fff`.
+- Sampled source-resolution pixels outside each active frame box but inside padded crop boxes.
+- Compared the current roll model against classified edge candidates.
+- Wrote a calibration review JSON artifact and a reference swatch image.
+- Confirmed the user's film-edge calibration idea is directionally correct, but it needs explicit reference classification.
+
+### Files Changed
+- `STATUS.md`
+- `status.json`
+
+### Run Command
+```bash
+@'<inline color calibration reference diagnostic script>'@ | python -
+```
+
+### Test Command
+```bash
+python -m json.tool output\color_calibration_logic_review_20260427T000000Z\color_calibration_logic_review.json
+```
+
+### Outputs To Inspect
+- `output/color_calibration_logic_review_20260427T000000Z/color_calibration_logic_review.json`
+- `output/color_calibration_logic_review_20260427T000000Z/reference_swatches.png`
+
+### Problems Found
+- Current `film_base_rgb` is close to the classified clear-film-base candidate, so the margin-based film-base idea is valid.
+- Current `black_reference_rgb` is effectively a very dark scanner / border value around `0.046` in all channels; it is stable, but it should not be treated as a complete white-point solution.
+- Margin samples mix multiple physical things: clear orange film base, dense black edge / scanner darkness, possible scanner background, and occasional scene leakage from padded crop regions.
+- The current model does not explicitly classify those reference types before calibration.
+
+### Suspected Causes
+- The existing percentile method was intentionally simple and robust enough for early output, but it collapses physically different references into two numbers.
+- Clear color-negative film base should anchor the positive black point after inversion; it is not a positive white reference.
+- Positive white / highlight density should be estimated from robust in-frame bright-content statistics, not from the clear film border alone.
+
+### Temporary Decisions / Workarounds
+- Adopt a two-stage color-calibration model for the next implementation step:
+  1. Use active crop boxes to sample candidate film-edge references outside frames.
+  2. Classify high-transmission orange clear-base pixels separately from dark edge / scanner pixels.
+  3. Use classified clear film base as the per-roll inversion/base-removal anchor.
+  4. Use robust in-frame high-density / highlight statistics for the positive white scale.
+  5. Apply guarded per-frame neutral balance only after base inversion and tone mapping.
+  6. Add conservative chroma shaping after neutral balance, not before.
+- Do not use a simple global warm bias as the primary fix.
+
+### README Check
+- no change needed
+
+### Remaining Work
+- Implement the classified film-edge calibration model in `grade_basic.py`.
+- Add unit coverage for reference classification and fallback behavior.
+- Rerun `图像 001.fff`, `图像 002.fff`, and `图像 003.fff` and compare color stats/contact sheets.
+
+### Recommended Next Step
+- Replace the current mixed-margin percentile color model with explicit film-edge reference classification, keeping the old percentile behavior as fallback when classification is weak.

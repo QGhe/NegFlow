@@ -1,26 +1,24 @@
 {
-  "current_step": 31,
-  "step_name": "Color quality review",
+  "current_step": 32,
+  "step_name": "Color calibration logic review",
   "status": "completed",
-  "last_updated": "2026-04-27T10:56:00+08:00",
+  "last_updated": "2026-04-27T11:05:00+08:00",
   "changed_files": [
     "STATUS.md",
     "status.json"
   ],
-  "run_command": "@'<inline color statistics script>'@ | python -",
-  "test_command": "python -m json.tool output\\color_review_20260427T000000Z\\color_quality_review.json",
+  "run_command": "@'<inline color calibration reference diagnostic script>'@ | python -",
+  "test_command": "python -m json.tool output\\color_calibration_logic_review_20260427T000000Z\\color_calibration_logic_review.json",
   "outputs_to_inspect": [
-    "output/color_review_20260427T000000Z/color_quality_review.json",
-    "output/图像 001_20260424T100940Z/04_base_grade/图像 001_graded_contact_sheet.png",
-    "output/图像 002_20260424T090816Z/04_base_grade/图像 002_graded_contact_sheet.png",
-    "output/图像 003_20260424T090427Z/04_base_grade/图像 003_graded_contact_sheet.png"
+    "output/color_calibration_logic_review_20260427T000000Z/color_calibration_logic_review.json",
+    "output/color_calibration_logic_review_20260427T000000Z/reference_swatches.png"
   ],
   "main_issues": [
-    "图像 001 is visibly and statistically cool/cyan, with average neutral RGB about [125.24, 133.85, 137.08] and R-B about -11.84.",
-    "图像 002 is close to neutral, with average neutral RGB about [129.31, 129.21, 128.90].",
-    "图像 003 is slightly warm on average, with average neutral RGB about [127.22, 125.94, 124.80].",
-    "The most consistent cross-roll issue is muted low-chroma color rather than one shared color cast."
+    "The current color model already samples crop margins, but it uses mixed 94th/2nd percentiles instead of explicitly classifying physical references.",
+    "Current film_base_rgb is close to the classified clear-film-base candidate on all three complete rolls, so film-edge calibration is a good direction.",
+    "Current black_reference_rgb is a very dark scanner or border value around 0.046 in all channels; it is stable but should not be used as a full white-point solution.",
+    "The next color model should classify clear film base separately from dark edge/scanner pixels, then use in-frame highlight density for the positive white scale."
   ],
   "readme_status": "no_change_needed",
-  "next_step": "Add a conservative post-balance saturation/chroma boost in the source TIFF grading path, then rerun 图像 001.fff, 图像 002.fff, and 图像 003.fff to compare contact sheets and stats."
+  "next_step": "Replace the current mixed-margin percentile color model with explicit film-edge reference classification, keeping the old percentile behavior as fallback when classification is weak."
 }
