@@ -58,7 +58,7 @@ The main remaining work is:
 
 - validate more real Hasselblad / FlexColor `.fff` rolls and choose an external converter command only for `.fff` variants that are not directly TIFF-compatible
 - validate the OpenCV-guided active crop detector on more real `.fff` rolls and tune fallback rules for unusual partial scans
-- continue improving color logic without disturbing crop or export behavior
+- continue improving color logic without disturbing crop or export behavior, with the next focus on controlled contrast / midtone separation
 - validate crop behavior on more normal and partial real rolls
 - continue reducing disk usage and runtime after validating the new draft / graded intermediate cleanup on more rolls
 - later add batch processing once the single-file `.fff` path is proven end to end
@@ -121,5 +121,5 @@ data/             sample scans
 
 - `.fff` handling first tries the configured backend mode. The default `tiff_passthrough` mode supports `.fff` files that are directly TIFF-compatible; non-compatible `.fff` files still require an external converter command.
 - The repository currently validates the `.fff -> TIFF -> full pipeline` handoff through a mock converter smoke test. A real Hasselblad X5/FlexColor converter command still needs to be chosen and tuned in your environment.
-- The current final PNGs are promoted from a conservative classified film-edge-reference grade with a small warm-neutral bias. Crop boxes now prefer plausible OpenCV strip-frame boxes and keep the projection detector as fallback. This reduces internal-texture over-splits but does not make crop errors impossible; visual review overlays remain part of the workflow. Color is improved but still not a final color-managed film profile.
+- The current final PNGs are promoted from a conservative classified film-edge-reference grade with a small warm-neutral bias. Crop boxes now prefer plausible OpenCV strip-frame boxes and keep the projection detector as fallback. This reduces internal-texture over-splits but does not make crop errors impossible; visual review overlays remain part of the workflow. Color is improved but still not a final color-managed film profile. The next likely color step is a guarded contrast adjustment that increases midtone separation without clipping snow, sky, or black film borders.
 - The default output-retention settings favor smaller task folders. Re-run with `output.keep_draft_frames: true` and `output.keep_graded_frames: true` when you need all intermediate per-frame PNG files for debugging.

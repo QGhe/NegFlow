@@ -2266,3 +2266,57 @@ python -m json.tool output\color_model_review_20260427T000000Z\classified_color_
 
 ### Recommended Next Step
 - Add one small post-balance chroma/saturation shaping step, then rerun the three complete rolls and compare against the Step 33 outputs.
+
+---
+
+## Step 34 - Documentation refresh before GitHub push
+Time: 2026-04-27 14:46 Asia/Shanghai
+Status: completed
+
+### Goal
+- Refresh project documentation before publishing the latest classified film-edge color model work to GitHub.
+
+### Completed
+- Updated README wording so the next color step is explicitly framed as controlled contrast / midtone separation.
+- Kept the implementation unchanged in this step.
+- Confirmed the working tree was clean before the documentation refresh.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+
+### Run Command
+```bash
+git status --short
+```
+
+### Test Command
+```bash
+python -m json.tool status.json
+```
+
+### Outputs To Inspect
+- `README.md`
+- `STATUS.md`
+- `status.json`
+
+### Problems Found
+- No code problem was found in this documentation-only step.
+- The latest local branch contains new commits beyond the previously pushed `origin/codex/active-crop-validation` branch.
+
+### Suspected Causes
+- Step 31 through Step 33 were committed locally after the previous GitHub push.
+
+### Temporary Decisions / Workarounds
+- Push the existing `main` HEAD to the safe GitHub branch `codex/active-crop-validation`, rather than pushing to remote `main`, because remote `main` has a separate history.
+
+### README Check
+- updated
+
+### Remaining Work
+- Push the branch to GitHub.
+- Start a separate contrast-tuning step after the push.
+
+### Recommended Next Step
+- Use a guarded S-curve / midtone contrast adjustment with highlight and shadow protection, then rerun the three complete rolls and compare contact sheets.

@@ -1,29 +1,25 @@
 {
-  "current_step": 33,
-  "step_name": "Classified film-edge color model",
+  "current_step": 34,
+  "step_name": "Documentation refresh before GitHub push",
   "status": "completed",
-  "last_updated": "2026-04-27T14:26:00+08:00",
+  "last_updated": "2026-04-27T14:46:00+08:00",
   "changed_files": [
     "README.md",
     "STATUS.md",
-    "status.json",
-    "src/negflow/pipeline/grade_basic.py",
-    "tests/test_runner.py"
+    "status.json"
   ],
-  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 001.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 002.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 003.fff\" --output output --preset neutral_archive",
-  "test_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v; python -m json.tool output\\color_model_review_20260427T000000Z\\classified_color_model_review.json",
+  "run_command": "git status --short",
+  "test_command": "python -m json.tool status.json",
   "outputs_to_inspect": [
-    "output/图像 001_20260427T060516Z/04_base_grade/图像 001_graded_contact_sheet.png",
-    "output/图像 002_20260427T061233Z/04_base_grade/图像 002_graded_contact_sheet.png",
-    "output/图像 003_20260427T061702Z/04_base_grade/图像 003_graded_contact_sheet.png",
-    "output/color_model_review_20260427T000000Z/classified_color_model_review.json"
+    "README.md",
+    "STATUS.md",
+    "status.json"
   ],
   "main_issues": [
-    "The color model now explicitly classifies clear film-base and dark-margin references instead of relying only on mixed margin percentiles.",
-    "图像 001.fff, 图像 002.fff, and 图像 003.fff all produced 12 final PNG files with the new model.",
-    "The new model is structurally better and slightly raises median luminance, but visual color change is intentionally small.",
-    "图像 001 still has a cool/cyan tendency, and the sample set still looks somewhat muted."
+    "README now states that the next likely color step is controlled contrast / midtone separation.",
+    "No implementation code changed in this step.",
+    "Local main contains color-review and classified color-model commits beyond the previously pushed GitHub branch."
   ],
   "readme_status": "updated",
-  "next_step": "Add one small post-balance chroma/saturation shaping step, then rerun the three complete rolls and compare against the Step 33 outputs."
+  "next_step": "Push local HEAD to codex/active-crop-validation, then implement a guarded S-curve / midtone contrast adjustment with highlight and shadow protection."
 }
