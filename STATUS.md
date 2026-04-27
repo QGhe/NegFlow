@@ -2067,3 +2067,64 @@ $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest disc
 
 ### Recommended Next Step
 - Start a small color-quality step: compare the latest final PNG contact sheets for `图像 001.fff`, `图像 002.fff`, and `图像 003.fff`, then tune only one color parameter or grading rule if a consistent cast/problem is visible.
+
+---
+
+## Step 31 - Color quality review
+Time: 2026-04-27 10:56 Asia/Shanghai
+Status: completed
+
+### Goal
+- Compare the latest final PNG outputs for `图像 001.fff`, `图像 002.fff`, and `图像 003.fff` before changing any color algorithm.
+
+### Completed
+- Reviewed the latest graded contact sheets for the three complete sample rolls.
+- Confirmed each latest run still has 12 final PNG files.
+- Wrote a color statistics review artifact using central final-PNG pixels while avoiding black borders where possible.
+- Validated the generated color review JSON.
+- Found that a single global warm-up is not the safest first color change: `图像 001` is visibly and statistically cool/cyan, `图像 002` is near neutral, and `图像 003` is slightly warm on average.
+- Found the more consistent issue across the sample set is conservative color: low saturation / muted chroma and a slightly gray look, especially on `图像 002` and `图像 003`.
+
+### Files Changed
+- `STATUS.md`
+- `status.json`
+
+### Run Command
+```bash
+@'<inline color statistics script>'@ | python -
+```
+
+### Test Command
+```bash
+python -m json.tool output\color_review_20260427T000000Z\color_quality_review.json
+```
+
+### Outputs To Inspect
+- `output/color_review_20260427T000000Z/color_quality_review.json`
+- `output/图像 001_20260424T100940Z/04_base_grade/图像 001_graded_contact_sheet.png`
+- `output/图像 002_20260424T090816Z/04_base_grade/图像 002_graded_contact_sheet.png`
+- `output/图像 003_20260424T090427Z/04_base_grade/图像 003_graded_contact_sheet.png`
+
+### Problems Found
+- `图像 001` average neutral RGB is approximately `[125.24, 133.85, 137.08]`, with R-B around `-11.84`, matching the visible cool/cyan cast.
+- `图像 002` average neutral RGB is approximately `[129.31, 129.21, 128.90]`, so it is not asking for a broad warm correction.
+- `图像 003` average neutral RGB is approximately `[127.22, 125.94, 124.80]`, slightly warm rather than cool.
+- Average chroma is low on `图像 002` and `图像 003`, and the contact sheets look muted / gray.
+
+### Suspected Causes
+- The current roll-level base normalization and per-frame neutral balance are doing useful cast control but are intentionally conservative.
+- The current grade has no explicit saturation or local contrast shaping after neutral balance, so overcast winter scenes can look flatter than expected.
+
+### Temporary Decisions / Workarounds
+- Do not start Step 32 with a simple global warm bias increase.
+- Prefer one small saturation/chroma or tone-contrast adjustment, then validate against all three complete rolls.
+
+### README Check
+- no change needed
+
+### Remaining Work
+- Implement one small color tweak and rerun the three complete rolls.
+- Keep an eye on `图像 001`, because it may still need a separate cooler-roll correction after the more general muted-color issue is addressed.
+
+### Recommended Next Step
+- Add a conservative post-balance saturation/chroma boost in the source TIFF grading path, then rerun `图像 001.fff`, `图像 002.fff`, and `图像 003.fff` to compare contact sheets and stats.

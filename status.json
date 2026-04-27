@@ -1,26 +1,26 @@
 {
-  "current_step": 30,
-  "step_name": "Validate active crop on image 001",
+  "current_step": 31,
+  "step_name": "Color quality review",
   "status": "completed",
-  "last_updated": "2026-04-24T18:14:00+08:00",
+  "last_updated": "2026-04-27T10:56:00+08:00",
   "changed_files": [
     "STATUS.md",
     "status.json"
   ],
-  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 001.fff\" --output output --preset neutral_archive",
-  "test_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v",
+  "run_command": "@'<inline color statistics script>'@ | python -",
+  "test_command": "python -m json.tool output\\color_review_20260427T000000Z\\color_quality_review.json",
   "outputs_to_inspect": [
-    "output/图像 001_20260424T100940Z/05_crop/图像 001_active_frame_boxes_overlay.png",
-    "output/图像 001_20260424T100940Z/05_crop/图像 001_frame_contact_sheet.png",
-    "output/图像 001_20260424T100940Z/07_final/final_png/",
-    "output/图像 001_20260424T100940Z/07_final/图像 001_sidecar.json"
+    "output/color_review_20260427T000000Z/color_quality_review.json",
+    "output/图像 001_20260424T100940Z/04_base_grade/图像 001_graded_contact_sheet.png",
+    "output/图像 002_20260424T090816Z/04_base_grade/图像 002_graded_contact_sheet.png",
+    "output/图像 003_20260424T090427Z/04_base_grade/图像 003_graded_contact_sheet.png"
   ],
   "main_issues": [
-    "图像 001.fff active selection used opencv_strip_frame_probe.",
-    "图像 001.fff projection detector, OpenCV active selection, and final PNG export all report 12 frames.",
-    "No obvious crop-selection failure was visible in the active overlay or contact sheet.",
-    "The active crop detector now passes the three complete sample rolls: 图像 001.fff, 图像 002.fff, and 图像 003.fff."
+    "图像 001 is visibly and statistically cool/cyan, with average neutral RGB about [125.24, 133.85, 137.08] and R-B about -11.84.",
+    "图像 002 is close to neutral, with average neutral RGB about [129.31, 129.21, 128.90].",
+    "图像 003 is slightly warm on average, with average neutral RGB about [127.22, 125.94, 124.80].",
+    "The most consistent cross-roll issue is muted low-chroma color rather than one shared color cast."
   ],
   "readme_status": "no_change_needed",
-  "next_step": "Start a small color-quality step: compare the latest final PNG contact sheets for 图像 001.fff, 图像 002.fff, and 图像 003.fff, then tune only one color parameter or grading rule if a consistent cast/problem is visible."
+  "next_step": "Add a conservative post-balance saturation/chroma boost in the source TIFF grading path, then rerun 图像 001.fff, 图像 002.fff, and 图像 003.fff to compare contact sheets and stats."
 }
