@@ -12,6 +12,7 @@ import tifffile
 
 from negflow.fff_backend import FffBackendUnavailable, load_backend_config
 from negflow.pipeline.crop import _trim_low_detail_vertical_tail, detect_frame_boundaries
+from negflow.pipeline.grade_basic import _classify_margin_references
 from negflow.pipeline.opencv_probe import write_opencv_crop_probe, write_opencv_strip_frame_probe
 from negflow.runner import _select_active_frame_boundaries, load_output_retention_config, process_fff, process_tiff
 
@@ -116,7 +117,9 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             self.assertTrue(Path(graded_frames["contact_sheet"]).exists())
             self.assertEqual(graded_frames["frame_count"], active_frame_boundary["box_count"])
             graded_metadata = json.loads(Path(graded_frames["metadata"]).read_text(encoding="utf-8"))
-            self.assertEqual(graded_metadata["roll_color_model"]["method"], "roll_margin_film_base_normalized_inversion")
+            self.assertEqual(graded_metadata["roll_color_model"]["method"], "classified_film_edge_reference_inversion")
+            self.assertIn("reference_classification", graded_metadata["roll_color_model"])
+            self.assertIn("density_reference_rgb", graded_metadata["roll_color_model"])
             self.assertIn("warmth_bias", graded_metadata["frames"][0]["grade"])
             final_png_export = sidecar["outputs"]["final_png_export"]
             self.assertTrue(Path(final_png_export["metadata"]).exists())
@@ -238,6 +241,24 @@ class ProcessTiffSmokeTest(unittest.TestCase):
             self.assertTrue(cleaned_mask_path.exists())
             self.assertTrue(overlay_path.exists())
             self.assertTrue(any("near_black_candidate" in candidate["flags"] for candidate in result["candidates"]))
+
+    def test_color_model_classifies_clear_base_and_dark_margin_references(self) -> None:
+        max_value = 65535.0
+        clear_base = np.tile(np.asarray([[52000, 36500, 28500]], dtype=np.float32), (700, 1))
+        dark_margin = np.tile(np.asarray([[3100, 3000, 3000]], dtype=np.float32), (700, 1))
+        scene_leak = np.tile(np.asarray([[26000, 24500, 23000]], dtype=np.float32), (700, 1))
+        samples = np.vstack([clear_base, dark_margin, scene_leak])
+
+        result = _classify_margin_references(samples, max_value)
+
+        self.assertEqual(result["clear_film_base_source"], "high_luminance_orange_margin_pixels")
+        self.assertEqual(result["dark_margin_source"], "low_luminance_low_chroma_margin_pixels")
+        self.assertGreaterEqual(result["clear_film_base_sample_count"], 256)
+        self.assertGreaterEqual(result["dark_margin_sample_count"], 256)
+        self.assertAlmostEqual(result["clear_film_base_rgb"][0], 52000 / max_value, places=3)
+        self.assertAlmostEqual(result["clear_film_base_rgb"][1], 36500 / max_value, places=3)
+        self.assertAlmostEqual(result["clear_film_base_rgb"][2], 28500 / max_value, places=3)
+        self.assertAlmostEqual(result["dark_margin_reference_rgb"][0], 3100 / max_value, places=3)
 
     def test_opencv_strip_frame_probe_splits_roi_frames_and_rejects_black_strip(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

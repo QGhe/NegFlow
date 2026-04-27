@@ -1,24 +1,29 @@
 {
-  "current_step": 32,
-  "step_name": "Color calibration logic review",
+  "current_step": 33,
+  "step_name": "Classified film-edge color model",
   "status": "completed",
-  "last_updated": "2026-04-27T11:05:00+08:00",
+  "last_updated": "2026-04-27T14:26:00+08:00",
   "changed_files": [
+    "README.md",
     "STATUS.md",
-    "status.json"
+    "status.json",
+    "src/negflow/pipeline/grade_basic.py",
+    "tests/test_runner.py"
   ],
-  "run_command": "@'<inline color calibration reference diagnostic script>'@ | python -",
-  "test_command": "python -m json.tool output\\color_calibration_logic_review_20260427T000000Z\\color_calibration_logic_review.json",
+  "run_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 001.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 002.fff\" --output output --preset neutral_archive; $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process \"data\\fff\\图像 003.fff\" --output output --preset neutral_archive",
+  "test_command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v; python -m json.tool output\\color_model_review_20260427T000000Z\\classified_color_model_review.json",
   "outputs_to_inspect": [
-    "output/color_calibration_logic_review_20260427T000000Z/color_calibration_logic_review.json",
-    "output/color_calibration_logic_review_20260427T000000Z/reference_swatches.png"
+    "output/图像 001_20260427T060516Z/04_base_grade/图像 001_graded_contact_sheet.png",
+    "output/图像 002_20260427T061233Z/04_base_grade/图像 002_graded_contact_sheet.png",
+    "output/图像 003_20260427T061702Z/04_base_grade/图像 003_graded_contact_sheet.png",
+    "output/color_model_review_20260427T000000Z/classified_color_model_review.json"
   ],
   "main_issues": [
-    "The current color model already samples crop margins, but it uses mixed 94th/2nd percentiles instead of explicitly classifying physical references.",
-    "Current film_base_rgb is close to the classified clear-film-base candidate on all three complete rolls, so film-edge calibration is a good direction.",
-    "Current black_reference_rgb is a very dark scanner or border value around 0.046 in all channels; it is stable but should not be used as a full white-point solution.",
-    "The next color model should classify clear film base separately from dark edge/scanner pixels, then use in-frame highlight density for the positive white scale."
+    "The color model now explicitly classifies clear film-base and dark-margin references instead of relying only on mixed margin percentiles.",
+    "图像 001.fff, 图像 002.fff, and 图像 003.fff all produced 12 final PNG files with the new model.",
+    "The new model is structurally better and slightly raises median luminance, but visual color change is intentionally small.",
+    "图像 001 still has a cool/cyan tendency, and the sample set still looks somewhat muted."
   ],
-  "readme_status": "no_change_needed",
-  "next_step": "Replace the current mixed-margin percentile color model with explicit film-edge reference classification, keeping the old percentile behavior as fallback when classification is weak."
+  "readme_status": "updated",
+  "next_step": "Add one small post-balance chroma/saturation shaping step, then rerun the three complete rolls and compare against the Step 33 outputs."
 }

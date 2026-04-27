@@ -102,40 +102,163 @@ def _open_source_for_grading(draft_frames_metadata: dict[str, Any]) -> tuple[np.
 
 
 def _estimate_roll_color_model(image: np.ndarray, frames: list[dict[str, Any]]) -> dict[str, Any]:
-    sample_chunks = []
+    margin_chunks = []
+    frame_chunks = []
     max_value = float(np.iinfo(image.dtype).max)
     for frame in frames:
         source_box = frame.get("source_box")
         padded_box = frame.get("padded_source_box")
         if not source_box or not padded_box:
             continue
+        frame_sample = _sample_source_box(image, source_box, max_step=48)
+        if frame_sample.size:
+            frame_chunks.append(frame_sample)
         for region in _frame_margin_regions(source_box, padded_box, image.shape[1], image.shape[0]):
             x0, y0, x1, y1 = region
             if x1 <= x0 or y1 <= y0:
                 continue
-            step = max(8, min(32, int(round(max(x1 - x0, y1 - y0) / 180))))
-            sample = np.asarray(image[y0:y1:step, x0:x1:step, :3]).reshape(-1, 3)
+            sample = _sample_source_region(image, x0, y0, x1, y1, max_step=32)
             if sample.size:
-                sample_chunks.append(sample)
+                margin_chunks.append(sample)
 
-    if sample_chunks:
-        samples = np.concatenate(sample_chunks).astype(np.float32) / max_value
+    if margin_chunks:
+        margin_samples = np.concatenate(margin_chunks).astype(np.float32)
+        reference_sample_source = "frame_margin_regions"
     else:
         stride = max(1, int(round(max(image.shape[0], image.shape[1]) / 1600)))
-        samples = np.asarray(image[::stride, ::stride, :3]).reshape(-1, 3).astype(np.float32) / max_value
+        margin_samples = np.asarray(image[::stride, ::stride, :3]).reshape(-1, 3).astype(np.float32)
+        reference_sample_source = "whole_image_fallback"
 
-    film_base = np.percentile(samples, 94.0, axis=0)
-    black_reference = np.percentile(samples, 2.0, axis=0)
-    film_base = np.maximum(film_base, 0.02)
-    black_reference = np.minimum(black_reference, film_base - 0.005)
+    reference_classification = _classify_margin_references(margin_samples, max_value)
+    film_base = np.asarray(reference_classification["clear_film_base_rgb"], dtype=np.float32)
+    dark_margin_reference = np.asarray(reference_classification["dark_margin_reference_rgb"], dtype=np.float32)
+
+    if frame_chunks:
+        frame_samples = np.concatenate(frame_chunks).astype(np.float32)
+    else:
+        frame_samples = margin_samples
+    density_reference, density_reference_detail = _estimate_density_reference(
+        frame_samples,
+        max_value=max_value,
+        film_base=film_base,
+        fallback_reference=dark_margin_reference,
+    )
     return {
-        "method": "roll_margin_film_base_normalized_inversion",
+        "method": "classified_film_edge_reference_inversion",
         "source_dtype": str(image.dtype),
-        "sample_count": int(samples.shape[0]),
-        "film_base_percentile": 94.0,
-        "black_reference_percentile": 2.0,
+        "reference_sample_source": reference_sample_source,
+        "sample_count": int(margin_samples.shape[0]),
+        "frame_sample_count": int(frame_samples.shape[0]),
+        "reference_classification": reference_classification,
+        "density_reference": density_reference_detail,
         "film_base_rgb": [float(value) for value in film_base],
-        "black_reference_rgb": [float(value) for value in black_reference],
+        "black_reference_rgb": [float(value) for value in density_reference],
+        "density_reference_rgb": [float(value) for value in density_reference],
+        "dark_margin_reference_rgb": [float(value) for value in dark_margin_reference],
+    }
+
+
+def _sample_source_box(image: np.ndarray, source_box: list[int], max_step: int) -> np.ndarray:
+    x0, y0, x1, y1 = source_box
+    return _sample_source_region(image, x0, y0, x1, y1, max_step=max_step)
+
+
+def _sample_source_region(
+    image: np.ndarray,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    *,
+    max_step: int,
+) -> np.ndarray:
+    if x1 <= x0 or y1 <= y0:
+        return np.empty((0, 3), dtype=np.float32)
+    step = max(8, min(max_step, int(round(max(x1 - x0, y1 - y0) / 180))))
+    return np.asarray(image[y0:y1:step, x0:x1:step, :3]).reshape(-1, 3)
+
+
+def _classify_margin_references(
+    samples: np.ndarray,
+    max_value: float,
+    *,
+    min_reference_samples: int = 256,
+) -> dict[str, Any]:
+    normalized = np.asarray(samples, dtype=np.float32).reshape(-1, 3) / max_value
+    fallback_film_base = np.maximum(np.percentile(normalized, 94.0, axis=0), 0.02)
+    fallback_dark = np.percentile(normalized, 2.0, axis=0)
+
+    luminance = normalized.mean(axis=1)
+    chroma = normalized.max(axis=1) - normalized.min(axis=1)
+
+    high_luminance = normalized[luminance >= np.percentile(luminance, 90.0)]
+    orange_base_mask = (
+        (high_luminance[:, 0] > high_luminance[:, 1])
+        & (high_luminance[:, 1] > high_luminance[:, 2])
+        & ((high_luminance[:, 0] - high_luminance[:, 2]) >= 0.08)
+    )
+    orange_base = high_luminance[orange_base_mask]
+    if orange_base.shape[0] >= min_reference_samples:
+        clear_base_samples = orange_base
+        clear_base_source = "high_luminance_orange_margin_pixels"
+    elif high_luminance.shape[0] >= min_reference_samples:
+        clear_base_samples = high_luminance
+        clear_base_source = "high_luminance_margin_pixels"
+    else:
+        clear_base_samples = normalized
+        clear_base_source = "fallback_all_margin_pixels"
+
+    low_luminance = normalized[luminance <= np.percentile(luminance, 10.0)]
+    low_luminance_chroma = low_luminance.max(axis=1) - low_luminance.min(axis=1)
+    low_chroma_dark = low_luminance[low_luminance_chroma <= np.percentile(low_luminance_chroma, 80.0)]
+    if low_chroma_dark.shape[0] >= min_reference_samples:
+        dark_samples = low_chroma_dark
+        dark_source = "low_luminance_low_chroma_margin_pixels"
+    elif low_luminance.shape[0] >= min_reference_samples:
+        dark_samples = low_luminance
+        dark_source = "low_luminance_margin_pixels"
+    else:
+        dark_samples = normalized
+        dark_source = "fallback_all_margin_pixels"
+
+    clear_base = np.maximum(np.percentile(clear_base_samples, 50.0, axis=0), 0.02)
+    dark_reference = np.minimum(np.percentile(dark_samples, 50.0, axis=0), clear_base - 0.005)
+    return {
+        "method": "margin_reference_classification",
+        "fallback_film_base_percentile": 94.0,
+        "fallback_dark_percentile": 2.0,
+        "fallback_film_base_rgb": [float(value) for value in fallback_film_base],
+        "fallback_dark_reference_rgb": [float(value) for value in fallback_dark],
+        "clear_film_base_source": clear_base_source,
+        "dark_margin_source": dark_source,
+        "clear_film_base_sample_count": int(clear_base_samples.shape[0]),
+        "dark_margin_sample_count": int(dark_samples.shape[0]),
+        "clear_film_base_rgb": [float(value) for value in clear_base],
+        "dark_margin_reference_rgb": [float(value) for value in dark_reference],
+        "luminance_p90": float(np.percentile(luminance, 90.0)),
+        "luminance_p10": float(np.percentile(luminance, 10.0)),
+        "mean_margin_chroma": float(chroma.mean()),
+    }
+
+
+def _estimate_density_reference(
+    samples: np.ndarray,
+    *,
+    max_value: float,
+    film_base: np.ndarray,
+    fallback_reference: np.ndarray,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    normalized = np.asarray(samples, dtype=np.float32).reshape(-1, 3) / max_value
+    raw_reference = np.percentile(normalized, 5.0, axis=0)
+    density_reference = np.maximum(raw_reference, fallback_reference)
+    density_reference = np.minimum(density_reference, film_base - 0.005)
+    return density_reference, {
+        "method": "in_frame_low_percentile_density_reference",
+        "percentile": 5.0,
+        "raw_density_reference_rgb": [float(value) for value in raw_reference],
+        "fallback_floor_rgb": [float(value) for value in fallback_reference],
+        "density_reference_rgb": [float(value) for value in density_reference],
+        "sample_count": int(normalized.shape[0]),
     }
 
 
@@ -168,8 +291,11 @@ def _grade_source_negative_frame(
     negative = np.clip(crop / max_value, 0.0, 1.0)
 
     film_base = np.asarray(roll_color_model["film_base_rgb"], dtype=np.float32)
-    black_reference = np.asarray(roll_color_model["black_reference_rgb"], dtype=np.float32)
-    span = np.maximum(film_base - black_reference, 0.005)
+    density_reference = np.asarray(
+        roll_color_model.get("density_reference_rgb", roll_color_model["black_reference_rgb"]),
+        dtype=np.float32,
+    )
+    span = np.maximum(film_base - density_reference, 0.005)
     positive = np.clip((film_base - negative) / span, 0.0, 1.0)
 
     luminance = positive.mean(axis=2)
@@ -193,6 +319,8 @@ def _grade_source_negative_frame(
         "method": "source_tiff_roll_film_base_normalized_grade",
         "film_base_rgb": roll_color_model["film_base_rgb"],
         "black_reference_rgb": roll_color_model["black_reference_rgb"],
+        "density_reference_rgb": [float(value) for value in density_reference],
+        "dark_margin_reference_rgb": roll_color_model.get("dark_margin_reference_rgb"),
         "luminance_low_percentile": 1.0,
         "luminance_high_percentile": 99.0,
         "luminance_low": low,

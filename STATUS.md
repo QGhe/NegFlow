@@ -2196,3 +2196,73 @@ python -m json.tool output\color_calibration_logic_review_20260427T000000Z\color
 
 ### Recommended Next Step
 - Replace the current mixed-margin percentile color model with explicit film-edge reference classification, keeping the old percentile behavior as fallback when classification is weak.
+
+---
+
+## Step 33 - Classified film-edge color model
+Time: 2026-04-27 14:26 Asia/Shanghai
+Status: completed
+
+### Goal
+- Replace the mixed-margin percentile color model with explicit film-edge reference classification while keeping conservative fallback behavior.
+
+### Completed
+- Updated `grade_basic.py` to classify margin samples into clear film-base and dark-margin references.
+- Added roll metadata for `reference_classification`, `density_reference`, `density_reference_rgb`, and `dark_margin_reference_rgb`.
+- Changed the source TIFF grading path to use the classified clear film base plus an in-frame low-percentile density reference.
+- Kept the old percentile estimates in metadata as fallback/reference fields.
+- Added unit coverage for clear film-base and dark-margin classification.
+- Updated the smoke test expectation for the new roll color model method.
+- Updated README color-method wording.
+- Re-ran `图像 001.fff`, `图像 002.fff`, and `图像 003.fff`; all produced 12 final PNG files.
+- Generated a before/after color model review JSON.
+- Re-ran the full unit test suite successfully.
+
+### Files Changed
+- `README.md`
+- `STATUS.md`
+- `status.json`
+- `src/negflow/pipeline/grade_basic.py`
+- `tests/test_runner.py`
+
+### Run Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 001.fff" --output output --preset neutral_archive
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 002.fff" --output output --preset neutral_archive
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m negflow process "data\fff\图像 003.fff" --output output --preset neutral_archive
+```
+
+### Test Command
+```bash
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONPATH='src'; python -m unittest discover -s tests -v
+python -m json.tool output\color_model_review_20260427T000000Z\classified_color_model_review.json
+```
+
+### Outputs To Inspect
+- `output/图像 001_20260427T060516Z/04_base_grade/图像 001_graded_contact_sheet.png`
+- `output/图像 002_20260427T061233Z/04_base_grade/图像 002_graded_contact_sheet.png`
+- `output/图像 003_20260427T061702Z/04_base_grade/图像 003_graded_contact_sheet.png`
+- `output/color_model_review_20260427T000000Z/classified_color_model_review.json`
+
+### Problems Found
+- The new model is deliberately conservative; visual change is small.
+- `图像 001` still has a noticeable cool/cyan tendency after the structural calibration improvement.
+- The classified model slightly raises median luminance across the three complete rolls, but it does not solve muted saturation by itself.
+
+### Suspected Causes
+- The previous edge percentile model already estimated film base reasonably well, so explicit classification mostly improves model correctness and traceability rather than making a dramatic visual shift.
+- The remaining muted look likely needs a separate, guarded chroma/saturation step after neutral balance.
+
+### Temporary Decisions / Workarounds
+- Keep classified film-edge calibration as the base color logic.
+- Do not add saturation/chroma shaping in this same step, so the impact of the calibration model stays isolated.
+
+### README Check
+- updated
+
+### Remaining Work
+- Add a conservative post-balance chroma boost and validate it separately.
+- Investigate whether `图像 001` needs a roll-level cool/cyan correction guard after the general chroma step.
+
+### Recommended Next Step
+- Add one small post-balance chroma/saturation shaping step, then rerun the three complete rolls and compare against the Step 33 outputs.
